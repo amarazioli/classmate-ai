@@ -15,11 +15,8 @@ const firebaseConfig = {
   appId: "1:130597552476:web:372cdabf885161870c0199"
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
-
-// Session ID - change for each class
 const SESSION_ID = "class-session-1";
 
 // ============================================
@@ -145,17 +142,14 @@ function LandingPage() {
             </div>
           </a>
         </div>
-
-        <p className="text-center text-slate-400 text-xs mt-8">
-          Share this link with class participants
-        </p>
+        <p className="text-center text-slate-400 text-xs mt-8">Share this link with class participants</p>
       </div>
     </div>
   );
 }
 
 // ============================================
-// STUDENT PAGE
+// STUDENT PAGE & VIEW
 // ============================================
 function StudentPage() {
   return (
@@ -171,6 +165,7 @@ function StudentView() {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [config, setConfig] = useState({ chapter: 'Loading...' });
+  const [pendingFeedback, setPendingFeedback] = useState(null);
   const chatEndRef = useRef(null);
 
   useEffect(() => {
@@ -180,6 +175,12 @@ function StudentView() {
       if (data) {
         const arr = Object.values(data).sort((a, b) => a.timestamp - b.timestamp);
         setMessages(arr);
+        
+        // Check if latest AI response needs feedback
+        const lastMsg = arr[arr.length - 1];
+        if (lastMsg && lastMsg.type === 'ai' && !lastMsg.feedbackGiven) {
+          setPendingFeedback(lastMsg);
+        }
       }
     });
 
@@ -192,15 +193,60 @@ function StudentView() {
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, pendingFeedback]);
 
   const sendMessage = () => {
     if (!message.trim()) return;
     const msgRef = push(ref(db, `sessions/${SESSION_ID}/messages`));
-    const newMsg = { id: msgRef.key, type: 'student', text: message, timestamp: Date.now() };
+    const newMsg = { 
+      id: msgRef.key, 
+      type: 'student', 
+      text: message, 
+      timestamp: Date.now(),
+      status: 'pending' // pending, solved, flagged
+    };
     set(msgRef, newMsg);
     set(ref(db, `sessions/${SESSION_ID}/queue/${msgRef.key}`), newMsg);
     setMessage('');
+  };
+
+  const handleFeedback = (feedbackType) => {
+    if (!pendingFeedback) return;
+    
+    // Find the original student question this AI response was replying to
+    const aiMsg = pendingFeedback;
+    const studentMsgId = aiMsg.replyTo;
+    
+    // Update the AI message to mark feedback given
+    update(ref(db, `sessions/${SESSION_ID}/messages/${aiMsg.id}`), {
+      feedbackGiven: true,
+      feedbackType: feedbackType
+    });
+
+    // Update the original student question status
+    if (studentMsgId) {
+      update(ref(db, `sessions/${SESSION_ID}/messages/${studentMsgId}`), {
+        status: feedbackType // 'solved' or 'flagged'
+      });
+
+      // If flagged, add to flagged questions for teacher
+      if (feedbackType === 'flagged') {
+        // Get the original question text
+        const originalQuestion = messages.find(m => m.id === studentMsgId);
+        if (originalQuestion) {
+          const flagRef = push(ref(db, `sessions/${SESSION_ID}/flagged`));
+          set(flagRef, {
+            id: flagRef.key,
+            questionId: studentMsgId,
+            text: originalQuestion.text,
+            timestamp: Date.now(),
+            aiResponse: aiMsg.text
+          });
+        }
+      }
+    }
+    
+    setPendingFeedback(null);
   };
 
   const formatTime = (ts) => {
@@ -245,18 +291,56 @@ function StudentView() {
           </div>
         )}
         
-        {messages.map((msg) => (
-          <div key={msg.id} className={`flex ${msg.type === 'student' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[85%] px-4 py-3 ${
-              msg.type === 'student'
-                ? 'text-white rounded-2xl rounded-tr-md shadow-lg'
-                : 'backdrop-blur-sm border border-white/10 rounded-2xl rounded-tl-md'
-            }`} style={msg.type === 'student' ? {background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'} : {background: 'rgba(255,255,255,0.1)'}}>
-              <p className="text-sm" style={{color: msg.type === 'student' ? 'white' : '#e2e8f0'}}>{msg.text}</p>
-              <p className="text-xs mt-1" style={{color: msg.type === 'student' ? '#bfdbfe' : '#64748b'}}>
-                {formatTime(msg.timestamp)}
-              </p>
+        {messages.map((msg, index) => (
+          <div key={msg.id}>
+            <div className={`flex ${msg.type === 'student' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[85%] px-4 py-3 ${
+                msg.type === 'student'
+                  ? 'text-white rounded-2xl rounded-tr-md shadow-lg'
+                  : 'backdrop-blur-sm border border-white/10 rounded-2xl rounded-tl-md'
+              }`} style={msg.type === 'student' ? {background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'} : {background: 'rgba(255,255,255,0.1)'}}>
+                <p className="text-sm" style={{color: msg.type === 'student' ? 'white' : '#e2e8f0'}}>{msg.text}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <p className="text-xs" style={{color: msg.type === 'student' ? '#bfdbfe' : '#64748b'}}>
+                    {formatTime(msg.timestamp)}
+                  </p>
+                  {msg.type === 'student' && msg.status && msg.status !== 'pending' && (
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${msg.status === 'solved' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                      {msg.status === 'solved' ? '✓ Solved' : '🚩 Flagged'}
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
+            
+            {/* Feedback buttons after AI response */}
+            {msg.type === 'ai' && pendingFeedback?.id === msg.id && !msg.feedbackGiven && (
+              <div className="flex justify-start mt-2 ml-2">
+                <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-3">
+                  <p className="text-xs text-slate-400 mb-2">Was this helpful?</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleFeedback('solved')}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-all flex items-center gap-1"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Yes, solved!
+                    </button>
+                    <button
+                      onClick={() => handleFeedback('flagged')}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 transition-all flex items-center gap-1"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" />
+                      </svg>
+                      Flag for teacher
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         ))}
         <div ref={chatEndRef} />
@@ -294,7 +378,7 @@ function StudentView() {
 }
 
 // ============================================
-// OPERATOR PAGE
+// OPERATOR PAGE & VIEW
 // ============================================
 function OperatorPage() {
   return (
@@ -310,15 +394,13 @@ function OperatorView() {
   const [queue, setQueue] = useState([]);
   const [selected, setSelected] = useState(null);
   const [reply, setReply] = useState('');
-  const [confusion, setConfusion] = useState({});
 
-  const topics = ["Quadratic Formula", "Factoring", "Variables", "Graph", "Sign changes", "Steps", "Other"];
   const quickReplies = [
     "Great question! The key is...",
     "Think of it this way...",
     "Yes, exactly right!",
     "Not quite - remember...",
-    "I'll flag this for your teacher."
+    "Let me explain step by step..."
   ];
 
   useEffect(() => {
@@ -332,27 +414,23 @@ function OperatorView() {
         setQueue([]);
       }
     });
-
-    const confusionRef = ref(db, `sessions/${SESSION_ID}/confusion`);
-    onValue(confusionRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) setConfusion(data);
-    });
   }, []);
 
   const sendReply = (qId) => {
     if (!reply.trim()) return;
     const msgRef = push(ref(db, `sessions/${SESSION_ID}/messages`));
-    const response = { id: msgRef.key, type: 'ai', text: reply, timestamp: Date.now(), replyTo: qId };
+    const response = { 
+      id: msgRef.key, 
+      type: 'ai', 
+      text: reply, 
+      timestamp: Date.now(), 
+      replyTo: qId,
+      feedbackGiven: false
+    };
     set(msgRef, response);
     remove(ref(db, `sessions/${SESSION_ID}/queue/${qId}`));
     setReply('');
     setSelected(null);
-  };
-
-  const tagConfusion = (topic) => {
-    const current = confusion[topic]?.count || 0;
-    set(ref(db, `sessions/${SESSION_ID}/confusion/${topic}`), { count: current + 1 });
   };
 
   const formatTime = (ts) => {
@@ -413,18 +491,6 @@ function OperatorView() {
                 <p className="text-sm text-white flex-1">"{q.text}"</p>
                 <span className="text-xs text-slate-500 whitespace-nowrap">{formatTime(q.timestamp)}</span>
               </div>
-              
-              <div className="flex flex-wrap gap-1 mb-3">
-                {topics.map((topic) => (
-                  <button
-                    key={topic}
-                    onClick={(e) => { e.stopPropagation(); tagConfusion(topic); }}
-                    className="px-2 py-1 rounded-lg text-xs bg-white/10 text-slate-400 hover:bg-amber-500/20 hover:text-amber-300 transition-all"
-                  >
-                    {topic}
-                  </button>
-                ))}
-              </div>
 
               {selected?.id === q.id && (
                 <div className="mt-3 pt-3 border-t border-white/10">
@@ -465,9 +531,9 @@ function OperatorView() {
       </div>
 
       <div className="relative p-4 border-t border-white/10">
-        <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-xl flex items-start gap-3">
+        <div className="bg-blue-500/10 border border-blue-500/30 p-3 rounded-xl flex items-start gap-3">
           <span className="text-lg">💡</span>
-          <p className="text-xs text-amber-300">Tag confusion topics before replying to update the teacher dashboard automatically.</p>
+          <p className="text-xs text-blue-300">After you reply, students can mark questions as "Solved" or "Flag for teacher". Only flagged questions appear in the teacher's confusion hotspots.</p>
         </div>
       </div>
     </div>
@@ -475,7 +541,7 @@ function OperatorView() {
 }
 
 // ============================================
-// TEACHER PAGE
+// TEACHER PAGE & VIEW
 // ============================================
 function TeacherPage() {
   return (
@@ -492,9 +558,8 @@ function TeacherView() {
   const [viewMode, setViewMode] = useState('live');
   const [todayChapter, setTodayChapter] = useState('');
   const [uploadedBook, setUploadedBook] = useState(null);
-  const [uploadedSlides, setUploadedSlides] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [confusion, setConfusion] = useState({});
+  const [flaggedQuestions, setFlaggedQuestions] = useState([]);
   const [stats] = useState({ activeStudents: 18, totalStudents: 24 });
 
   const chapters = [
@@ -526,10 +591,15 @@ function TeacherView() {
       if (data) setMessages(Object.values(data));
     });
 
-    const confusionRef = ref(db, `sessions/${SESSION_ID}/confusion`);
-    onValue(confusionRef, (snapshot) => {
+    // Listen to flagged questions
+    const flaggedRef = ref(db, `sessions/${SESSION_ID}/flagged`);
+    onValue(flaggedRef, (snapshot) => {
       const data = snapshot.val();
-      if (data) setConfusion(data);
+      if (data) {
+        setFlaggedQuestions(Object.values(data).sort((a, b) => b.timestamp - a.timestamp));
+      } else {
+        setFlaggedQuestions([]);
+      }
     });
   }, []);
 
@@ -538,16 +608,14 @@ function TeacherView() {
     set(ref(db, `sessions/${SESSION_ID}/config`), {
       chapter: todayChapter,
       book: uploadedBook,
-      slides: uploadedSlides,
       startedAt: Date.now()
     });
     setSetupStage('live');
   };
 
-  const sortedConfusion = Object.entries(confusion).sort((a, b) => (b[1]?.count || 0) - (a[1]?.count || 0)).slice(0, 4);
-  const maxConfusion = Math.max(...sortedConfusion.map(([, d]) => d?.count || 0), 1);
-  const topConfusion = sortedConfusion[0];
   const questionCount = messages.filter(m => m.type === 'student').length;
+  const solvedCount = messages.filter(m => m.type === 'student' && m.status === 'solved').length;
+  const flaggedCount = flaggedQuestions.length;
 
   return (
     <div className="relative min-h-screen flex flex-col">
@@ -681,55 +749,59 @@ function TeacherView() {
 
             {viewMode === 'live' && (
               <>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-4 gap-2">
                   <div className="bg-white/5 border border-white/10 p-3 rounded-2xl text-center">
-                    <p className="text-2xl font-bold" style={{background: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{stats.totalStudents}</p>
+                    <p className="text-xl font-bold" style={{background: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{stats.totalStudents}</p>
                     <p className="text-xs text-slate-400 mt-0.5">Students</p>
                   </div>
                   <div className="bg-white/5 border border-white/10 p-3 rounded-2xl text-center">
-                    <p className="text-2xl font-bold" style={{background: 'linear-gradient(135deg, #fbbf24 0%, #f97316 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{questionCount}</p>
+                    <p className="text-xl font-bold" style={{background: 'linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{questionCount}</p>
                     <p className="text-xs text-slate-400 mt-0.5">Questions</p>
                   </div>
                   <div className="bg-white/5 border border-white/10 p-3 rounded-2xl text-center">
-                    <p className="text-2xl font-bold" style={{background: 'linear-gradient(135deg, #34d399 0%, #10b981 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{Math.round((stats.activeStudents / stats.totalStudents) * 100)}%</p>
-                    <p className="text-xs text-slate-400 mt-0.5">Engaged</p>
+                    <p className="text-xl font-bold" style={{background: 'linear-gradient(135deg, #34d399 0%, #10b981 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{solvedCount}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Solved</p>
+                  </div>
+                  <div className="bg-white/5 border border-white/10 p-3 rounded-2xl text-center">
+                    <p className="text-xl font-bold" style={{background: 'linear-gradient(135deg, #fbbf24 0%, #f97316 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{flaggedCount}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Flagged</p>
                   </div>
                 </div>
 
                 <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
-                  <h4 className="font-medium text-white text-sm mb-3 flex items-center gap-2">🔥 Confusion Hotspots</h4>
-                  {sortedConfusion.length === 0 ? (
-                    <p className="text-slate-400 text-sm text-center py-4">Waiting for questions...</p>
+                  <h4 className="font-medium text-white text-sm mb-3 flex items-center gap-2">
+                    🚩 Flagged Questions
+                    <span className="text-xs text-slate-500 font-normal">(Students need help)</span>
+                  </h4>
+                  {flaggedQuestions.length === 0 ? (
+                    <div className="text-center py-6">
+                      <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-emerald-500/10 flex items-center justify-center">
+                        <svg className="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                      <p className="text-slate-400 text-sm">No flagged questions!</p>
+                      <p className="text-slate-500 text-xs mt-1">Students are finding the AI helpful</p>
+                    </div>
                   ) : (
-                    <div className="space-y-3">
-                      {sortedConfusion.map(([topic, data], i) => (
-                        <div key={topic}>
-                          <div className="flex justify-between text-xs mb-1.5">
-                            <span className="text-slate-300">{topic}</span>
-                            <span className="text-slate-500">{data?.count || 0} asks</span>
-                          </div>
-                          <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full rounded-full transition-all duration-500"
-                              style={{
-                                width: `${((data?.count || 0) / maxConfusion) * 100}%`,
-                                background: i === 0 ? 'linear-gradient(90deg, #ef4444, #f87171)' : i === 1 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : 'linear-gradient(90deg, #10b981, #34d399)'
-                              }}
-                            />
-                          </div>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {flaggedQuestions.map((q) => (
+                        <div key={q.id} className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                          <p className="text-sm text-white mb-1">"{q.text}"</p>
+                          <p className="text-xs text-slate-500">AI said: "{q.aiResponse?.substring(0, 50)}..."</p>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
 
-                {topConfusion && topConfusion[1]?.count >= 3 && (
+                {flaggedCount >= 2 && (
                   <div className="p-4 rounded-2xl border border-amber-500/30" style={{background: 'linear-gradient(135deg, rgba(245,158,11,0.2) 0%, rgba(249,115,22,0.2) 100%)'}}>
                     <div className="flex items-start gap-3">
                       <span className="text-lg">⚡</span>
                       <div>
                         <p className="text-sm text-amber-300 font-medium">Suggestion</p>
-                        <p className="text-xs text-amber-200/80 mt-0.5">{topConfusion[1].count} students asked about "{topConfusion[0]}". Consider a quick recap!</p>
+                        <p className="text-xs text-amber-200/80 mt-0.5">{flaggedCount} questions flagged by students. Consider pausing to address these topics!</p>
                       </div>
                     </div>
                   </div>
@@ -757,17 +829,42 @@ function TeacherView() {
                 </div>
 
                 <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
-                  <h4 className="font-medium text-white text-sm mb-3">💬 Questions</h4>
-                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                  <h4 className="font-medium text-white text-sm mb-3">💬 All Questions This Session</h4>
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
                     {messages.filter(m => m.type === 'student').length === 0 ? (
                       <p className="text-slate-400 text-sm text-center py-4">No questions yet</p>
                     ) : (
                       messages.filter(m => m.type === 'student').map((msg) => (
-                        <div key={msg.id} className="p-2 bg-white/5 rounded-xl">
-                          <p className="text-xs text-slate-300">"{msg.text}"</p>
+                        <div key={msg.id} className={`p-3 rounded-xl ${msg.status === 'flagged' ? 'bg-amber-500/10 border border-amber-500/20' : msg.status === 'solved' ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-white/5'}`}>
+                          <p className="text-sm text-slate-300">"{msg.text}"</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            {msg.status && msg.status !== 'pending' && (
+                              <span className={`text-xs px-1.5 py-0.5 rounded ${msg.status === 'solved' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                                {msg.status === 'solved' ? '✓ Solved' : '🚩 Flagged'}
+                              </span>
+                            )}
+                            {(!msg.status || msg.status === 'pending') && (
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-400">Pending</span>
+                            )}
+                          </div>
                         </div>
                       ))
                     )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-white/5 border border-white/10 p-3 rounded-xl text-center">
+                    <p className="text-lg font-bold text-white">{questionCount}</p>
+                    <p className="text-xs text-slate-400">Total</p>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl text-center">
+                    <p className="text-lg font-bold text-emerald-400">{solvedCount}</p>
+                    <p className="text-xs text-emerald-400/70">Solved</p>
+                  </div>
+                  <div className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl text-center">
+                    <p className="text-lg font-bold text-amber-400">{flaggedCount}</p>
+                    <p className="text-xs text-amber-400/70">Flagged</p>
                   </div>
                 </div>
               </>
