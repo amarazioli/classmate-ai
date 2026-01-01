@@ -552,10 +552,6 @@ function OperatorView() {
 
   const sendReply = (qId) => {
     if (!reply.trim()) return;
-    if (!selectedTopic) {
-      alert('Please select a topic before sending!');
-      return;
-    }
     
     const msgRef = push(ref(db, `sessions/${SESSION_ID}/messages`));
     const response = { 
@@ -564,7 +560,7 @@ function OperatorView() {
       text: reply, 
       timestamp: Date.now(), 
       replyTo: qId,
-      confusionTopic: selectedTopic,
+      confusionTopic: selectedTopic || null,
       feedbackGiven: false
     };
     set(msgRef, response);
@@ -641,12 +637,12 @@ function OperatorView() {
               {selected?.id === q.id && (
                 <div className="mt-3 pt-3 border-t border-white/10">
                   <div className="mb-3">
-                    <p className="text-xs text-slate-400 mb-2">Select topic (required):</p>
+                    <p className="text-xs text-slate-400 mb-2">Select topic (optional):</p>
                     <div className="flex flex-wrap gap-1">
                       {topics.map((topic) => (
                         <button
                           key={topic}
-                          onClick={(e) => { e.stopPropagation(); setSelectedTopic(topic); }}
+                          onClick={(e) => { e.stopPropagation(); setSelectedTopic(selectedTopic === topic ? '' : topic); }}
                           className={`px-2 py-1 rounded-lg text-xs transition-all ${
                             selectedTopic === topic
                               ? 'bg-amber-500 text-white'
@@ -683,20 +679,12 @@ function OperatorView() {
                     />
                     <button
                       onClick={(e) => { e.stopPropagation(); sendReply(q.id); }}
-                      disabled={!selectedTopic}
-                      className={`px-4 py-2 rounded-xl text-sm font-medium text-white transition-all ${
-                        selectedTopic 
-                          ? 'hover:shadow-lg' 
-                          : 'opacity-50 cursor-not-allowed'
-                      }`}
+                      className="px-4 py-2 rounded-xl text-sm font-medium text-white transition-all hover:shadow-lg"
                       style={{background: 'linear-gradient(135deg, #f87171 0%, #dc2626 100%)'}}
                     >
                       Send
                     </button>
                   </div>
-                  {!selectedTopic && (
-                    <p className="text-xs text-amber-400 mt-2">⚠️ Select a topic before sending</p>
-                  )}
                 </div>
               )}
             </div>
@@ -707,7 +695,7 @@ function OperatorView() {
       <div className="relative p-4 border-t border-white/10">
         <div className="bg-blue-500/10 border border-blue-500/30 p-3 rounded-xl flex items-start gap-3">
           <span className="text-lg">💡</span>
-          <p className="text-xs text-blue-300">Select a topic before replying. If the student flags the question, only then will it appear in the teacher's confusion matrix.</p>
+          <p className="text-xs text-blue-300">Click a question to reply. Optionally select a topic to help categorize confusion areas.</p>
         </div>
       </div>
     </div>
@@ -903,20 +891,6 @@ function TeacherView() {
                     <p className="text-sm text-amber-300 font-medium">Suggestion</p>
                     <p className="text-xs text-amber-200/80 mt-0.5">{topConfusion[1].count} students flagged "{topConfusion[0]}" for help. Consider a quick recap!</p>
                   </div>
-                </div>
-              </div>
-            )}
-
-            {flaggedQuestions.length > 0 && (
-              <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
-                <h4 className="font-medium text-white text-sm mb-3">🚩 Flagged Questions</h4>
-                <div className="space-y-2 max-h-32 overflow-y-auto">
-                  {flaggedQuestions.slice(0, 5).map((q) => (
-                    <div key={q.id} className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-                      <p className="text-xs text-white">"{q.text}"</p>
-                      <p className="text-xs text-amber-400 mt-1">Topic: {q.topic}</p>
-                    </div>
-                  ))}
                 </div>
               </div>
             )}
