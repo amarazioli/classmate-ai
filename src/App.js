@@ -204,6 +204,10 @@ function StudentView() {
         if (lastMsg && lastMsg.type === 'ai' && !lastMsg.feedbackGiven) {
           setPendingFeedback(lastMsg);
         }
+      } else {
+        // Reset when data is cleared (new class session)
+        setMessages([]);
+        setPendingFeedback(null);
       }
     });
 
