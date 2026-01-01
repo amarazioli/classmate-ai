@@ -1062,10 +1062,7 @@ function TeacherView() {
                       {flaggedQuestions.slice(0, 5).map((q) => (
                         <div key={q.id} className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
                           <p className="text-xs text-white">"{q.text}"</p>
-                          <div className="flex items-center justify-between mt-1">
-                            <p className="text-xs text-amber-400">Topic: {q.topic}</p>
-                            {q.studentName && <p className="text-xs text-slate-500">{q.studentName}</p>}
-                          </div>
+                          <p className="text-xs text-amber-400 mt-1">Topic: {q.topic}</p>
                         </div>
                       ))}
                     </div>
@@ -1087,12 +1084,17 @@ function TeacherView() {
                     <p className="text-slate-400 text-sm text-center py-4">No students have joined yet</p>
                   ) : (
                     <div className="grid grid-cols-2 gap-2">
-                      {connectedStudents.map((student, i) => (
-                        <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-emerald-500/10">
-                          <span className="text-xs text-slate-300">{student.name}</span>
-                          <span className="text-xs text-emerald-400">{student.questionsAsked || 0} Q</span>
-                        </div>
-                      ))}
+                      {connectedStudents.map((student, i) => {
+                        const hasParticipated = (student.questionsAsked || 0) > 0;
+                        return (
+                          <div key={i} className={`flex items-center justify-between p-2 rounded-lg ${hasParticipated ? 'bg-emerald-500/10' : 'bg-white/5'}`}>
+                            <span className="text-xs text-slate-300">{student.name}</span>
+                            <span className={`text-xs ${hasParticipated ? 'text-emerald-400' : 'text-slate-500'}`}>
+                              {hasParticipated ? '✓ Active' : '—'}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1107,18 +1109,15 @@ function TeacherView() {
                       messages.filter(m => m.type === 'student' && isLikelyQuestion(m.text)).map((msg) => (
                         <div key={msg.id} className={`p-3 rounded-xl ${msg.status === 'flagged' ? 'bg-amber-500/10 border border-amber-500/20' : msg.status === 'solved' ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-white/5'}`}>
                           <p className="text-sm text-slate-300">"{msg.text}"</p>
-                          <div className="flex items-center justify-between mt-1">
-                            <div className="flex items-center gap-2">
-                              {msg.status && msg.status !== 'pending' && (
-                                <span className={`text-xs px-1.5 py-0.5 rounded ${msg.status === 'solved' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
-                                  {msg.status === 'solved' ? '✓ Solved' : '🚩 Flagged'}
-                                </span>
-                              )}
-                              {(!msg.status || msg.status === 'pending') && (
-                                <span className="text-xs px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-400">Pending</span>
-                              )}
-                            </div>
-                            {msg.studentName && <span className="text-xs text-slate-500">{msg.studentName}</span>}
+                          <div className="flex items-center gap-2 mt-1">
+                            {msg.status && msg.status !== 'pending' && (
+                              <span className={`text-xs px-1.5 py-0.5 rounded ${msg.status === 'solved' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                                {msg.status === 'solved' ? '✓ Solved' : '🚩 Flagged'}
+                              </span>
+                            )}
+                            {(!msg.status || msg.status === 'pending') && (
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-400">Pending</span>
+                            )}
                           </div>
                         </div>
                       ))
