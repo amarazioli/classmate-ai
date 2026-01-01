@@ -40,10 +40,8 @@ const isLikelyQuestion = (text) => {
   if (!text) return false;
   const trimmed = text.trim().toLowerCase();
   
-  // Check if ends with question mark
   const hasQuestionMark = trimmed.endsWith('?');
   
-  // Check if starts with common question words
   const questionStarters = [
     'what', 'why', 'how', 'when', 'where', 'who', 'which', 'whose',
     'is', 'are', 'was', 'were', 'do', 'does', 'did', 'can', 'could',
@@ -54,7 +52,6 @@ const isLikelyQuestion = (text) => {
   const firstWord = trimmed.split(/\s+/)[0];
   const startsWithQuestionWord = questionStarters.includes(firstWord);
   
-  // Return true if EITHER condition is met (OR logic)
   return hasQuestionMark || startsWithQuestionWord;
 };
 
@@ -211,7 +208,6 @@ function StudentView() {
   const [takenStudents, setTakenStudents] = useState([]);
   const chatEndRef = useRef(null);
 
-  // Listen for which students are already taken
   useEffect(() => {
     const studentsRef = ref(db, `sessions/${SESSION_ID}/students`);
     onValue(studentsRef, (snapshot) => {
@@ -220,7 +216,6 @@ function StudentView() {
         setTakenStudents(Object.keys(data));
       } else {
         setTakenStudents([]);
-        // If students were cleared (new session), reset current student
         if (currentStudent) {
           setCurrentStudent(null);
           sessionStorage.removeItem('classmate_student');
@@ -229,12 +224,9 @@ function StudentView() {
     });
   }, []);
 
-  // Register student as active when they join
   const joinAsStudent = (student) => {
     setCurrentStudent(student);
     sessionStorage.setItem('classmate_student', JSON.stringify(student));
-    
-    // Register in Firebase
     set(ref(db, `sessions/${SESSION_ID}/students/${student.id}`), {
       name: student.name,
       joinedAt: Date.now(),
@@ -247,7 +239,6 @@ function StudentView() {
     onValue(messagesRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
-        // Filter messages to only show current student's messages and AI responses to them
         const arr = Object.values(data).sort((a, b) => a.timestamp - b.timestamp);
         if (currentStudent) {
           const filtered = arr.filter(m => 
@@ -286,7 +277,6 @@ function StudentView() {
     set(msgRef, newMsg);
     set(ref(db, `sessions/${SESSION_ID}/queue/${msgRef.key}`), newMsg);
     
-    // Update student's last activity
     update(ref(db, `sessions/${SESSION_ID}/students/${currentStudent.id}`), {
       lastActivity: Date.now(),
       questionsAsked: (messages.filter(m => m.type === 'student').length + 1)
@@ -738,7 +728,6 @@ function TeacherPage() {
 }
 
 function TeacherView() {
-  const [setupStage, setSetupStage] = useState('live');
   const [viewMode, setViewMode] = useState('live');
   const [messages, setMessages] = useState([]);
   const [confusion, setConfusion] = useState({});
@@ -746,17 +735,11 @@ function TeacherView() {
   const [connectedStudents, setConnectedStudents] = useState([]);
 
   useEffect(() => {
-    if (setupStage === 'parsing') {
-      const timer = setTimeout(() => setSetupStage('confirm'), 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [setupStage]);
-
-  useEffect(() => {
     const messagesRef = ref(db, `sessions/${SESSION_ID}/messages`);
     onValue(messagesRef, (snapshot) => {
       const data = snapshot.val();
       if (data) setMessages(Object.values(data));
+      else setMessages([]);
     });
 
     const confusionRef = ref(db, `sessions/${SESSION_ID}/confusion`);
@@ -790,14 +773,12 @@ function TeacherView() {
   const resetSession = () => {
     if (!window.confirm('Start a new class session? This will clear all current messages and questions.')) return;
     
-    // Clear all session data
     remove(ref(db, `sessions/${SESSION_ID}/messages`));
     remove(ref(db, `sessions/${SESSION_ID}/queue`));
     remove(ref(db, `sessions/${SESSION_ID}/confusion`));
     remove(ref(db, `sessions/${SESSION_ID}/flagged`));
     remove(ref(db, `sessions/${SESSION_ID}/students`));
     
-    // Reset local state
     setMessages([]);
     setConfusion({});
     setFlaggedQuestions([]);
@@ -810,9 +791,7 @@ function TeacherView() {
   const maxConfusion = Math.max(...sortedConfusion.map(([, d]) => d?.count || 0), 1);
   const topConfusion = sortedConfusion[0];
 
-  // Filter to only count actual questions
   const questionCount = messages.filter(m => m.type === 'student' && isLikelyQuestion(m.text)).length;
-  const allStudentMsgCount = messages.filter(m => m.type === 'student').length;
   const solvedCount = messages.filter(m => m.type === 'student' && m.status === 'solved').length;
   const flaggedCount = flaggedQuestions.length;
 
@@ -830,7 +809,7 @@ function TeacherView() {
             </div>
             <div>
               <h3 className="text-white font-semibold">Teacher Dashboard</h3>
-              <p className="text-slate-400 text-xs">Mathematics • Live Session</p>
+              <p className="text-slate-400 text-xs">Live Session</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -854,167 +833,163 @@ function TeacherView() {
       
       <div className="relative flex-1 p-4 space-y-4 overflow-y-auto">
         <div className="flex gap-2 p-1 bg-white/10 rounded-xl">
-              <button onClick={() => setViewMode('live')} className={`flex-1 py-2.5 px-3 rounded-lg text-xs font-semibold transition-all ${viewMode === 'live' ? 'bg-emerald-500 text-white shadow-lg' : 'text-slate-400'}`}>
-                🔴 Live Class
-              </button>
-              <button onClick={() => setViewMode('review')} className={`flex-1 py-2.5 px-3 rounded-lg text-xs font-semibold transition-all ${viewMode === 'review' ? 'bg-emerald-500 text-white shadow-lg' : 'text-slate-400'}`}>
-                📋 Post-Class
-              </button>
+          <button onClick={() => setViewMode('live')} className={`flex-1 py-2.5 px-3 rounded-lg text-xs font-semibold transition-all ${viewMode === 'live' ? 'bg-emerald-500 text-white shadow-lg' : 'text-slate-400'}`}>
+            🔴 Live Class
+          </button>
+          <button onClick={() => setViewMode('review')} className={`flex-1 py-2.5 px-3 rounded-lg text-xs font-semibold transition-all ${viewMode === 'review' ? 'bg-emerald-500 text-white shadow-lg' : 'text-slate-400'}`}>
+            📋 Post-Class
+          </button>
+        </div>
+
+        {viewMode === 'live' && (
+          <>
+            <div className="grid grid-cols-4 gap-2">
+              <div className="bg-white/5 border border-white/10 p-3 rounded-2xl text-center">
+                <p className="text-xl font-bold" style={{background: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{connectedStudents.length}</p>
+                <p className="text-xs text-slate-400 mt-0.5">Students</p>
+              </div>
+              <div className="bg-white/5 border border-white/10 p-3 rounded-2xl text-center">
+                <p className="text-xl font-bold" style={{background: 'linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{questionCount}</p>
+                <p className="text-xs text-slate-400 mt-0.5">Questions</p>
+              </div>
+              <div className="bg-white/5 border border-white/10 p-3 rounded-2xl text-center">
+                <p className="text-xl font-bold" style={{background: 'linear-gradient(135deg, #34d399 0%, #10b981 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{solvedCount}</p>
+                <p className="text-xs text-slate-400 mt-0.5">Solved</p>
+              </div>
+              <div className="bg-white/5 border border-white/10 p-3 rounded-2xl text-center">
+                <p className="text-xl font-bold" style={{background: 'linear-gradient(135deg, #fbbf24 0%, #f97316 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{flaggedCount}</p>
+                <p className="text-xs text-slate-400 mt-0.5">Flagged</p>
+              </div>
             </div>
 
-            {viewMode === 'live' && (
-              <>
-                <div className="grid grid-cols-4 gap-2">
-                  <div className="bg-white/5 border border-white/10 p-3 rounded-2xl text-center">
-                    <p className="text-xl font-bold" style={{background: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{connectedStudents.length}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">Students</p>
-                  </div>
-                  <div className="bg-white/5 border border-white/10 p-3 rounded-2xl text-center">
-                    <p className="text-xl font-bold" style={{background: 'linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{questionCount}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">Questions</p>
-                  </div>
-                  <div className="bg-white/5 border border-white/10 p-3 rounded-2xl text-center">
-                    <p className="text-xl font-bold" style={{background: 'linear-gradient(135deg, #34d399 0%, #10b981 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{solvedCount}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">Solved</p>
-                  </div>
-                  <div className="bg-white/5 border border-white/10 p-3 rounded-2xl text-center">
-                    <p className="text-xl font-bold" style={{background: 'linear-gradient(135deg, #fbbf24 0%, #f97316 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{flaggedCount}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">Flagged</p>
-                  </div>
+            <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
+              <h4 className="font-medium text-white text-sm mb-3 flex items-center gap-2">
+                🔥 Confusion Hotspots
+                <span className="text-xs text-slate-500 font-normal">(from flagged questions)</span>
+              </h4>
+              {sortedConfusion.length === 0 ? (
+                <div className="text-center py-4">
+                  <p className="text-slate-400 text-sm">No confusion data yet</p>
+                  <p className="text-slate-500 text-xs mt-1">Topics appear when students flag questions</p>
                 </div>
-
-                <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
-                  <h4 className="font-medium text-white text-sm mb-3 flex items-center gap-2">
-                    🔥 Confusion Hotspots
-                    <span className="text-xs text-slate-500 font-normal">(from flagged questions)</span>
-                  </h4>
-                  {sortedConfusion.length === 0 ? (
-                    <div className="text-center py-4">
-                      <p className="text-slate-400 text-sm">No confusion data yet</p>
-                      <p className="text-slate-500 text-xs mt-1">Topics appear when students flag questions</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {sortedConfusion.map(([topic, data], i) => (
-                        <div key={topic}>
-                          <div className="flex justify-between text-xs mb-1.5">
-                            <span className="text-slate-300">{topic}</span>
-                            <span className="text-slate-500">{data?.count || 0} flagged</span>
-                          </div>
-                          <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full rounded-full transition-all duration-500"
-                              style={{
-                                width: `${((data?.count || 0) / maxConfusion) * 100}%`,
-                                background: i === 0 ? 'linear-gradient(90deg, #ef4444, #f87171)' : i === 1 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : 'linear-gradient(90deg, #10b981, #34d399)'
-                              }}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {topConfusion && topConfusion[1]?.count >= 2 && (
-                  <div className="p-4 rounded-2xl border border-amber-500/30" style={{background: 'linear-gradient(135deg, rgba(245,158,11,0.2) 0%, rgba(249,115,22,0.2) 100%)'}}>
-                    <div className="flex items-start gap-3">
-                      <span className="text-lg">⚡</span>
-                      <div>
-                        <p className="text-sm text-amber-300 font-medium">Suggestion</p>
-                        <p className="text-xs text-amber-200/80 mt-0.5">{topConfusion[1].count} students flagged "{topConfusion[0]}" for help. Consider a quick recap!</p>
+              ) : (
+                <div className="space-y-3">
+                  {sortedConfusion.map(([topic, data], i) => (
+                    <div key={topic}>
+                      <div className="flex justify-between text-xs mb-1.5">
+                        <span className="text-slate-300">{topic}</span>
+                        <span className="text-slate-500">{data?.count || 0} flagged</span>
+                      </div>
+                      <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{
+                            width: `${((data?.count || 0) / maxConfusion) * 100}%`,
+                            background: i === 0 ? 'linear-gradient(90deg, #ef4444, #f87171)' : i === 1 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : 'linear-gradient(90deg, #10b981, #34d399)'
+                          }}
+                        />
                       </div>
                     </div>
-                  </div>
-                )}
+                  ))}
+                </div>
+              )}
+            </div>
 
-                {flaggedQuestions.length > 0 && (
-                  <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
-                    <h4 className="font-medium text-white text-sm mb-3">🚩 Flagged Questions</h4>
-                    <div className="space-y-2 max-h-32 overflow-y-auto">
-                      {flaggedQuestions.slice(0, 5).map((q) => (
-                        <div key={q.id} className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-                          <p className="text-xs text-white">"{q.text}"</p>
-                          <p className="text-xs text-amber-400 mt-1">Topic: {q.topic}</p>
-                        </div>
-                      ))}
-                    </div>
+            {topConfusion && topConfusion[1]?.count >= 2 && (
+              <div className="p-4 rounded-2xl border border-amber-500/30" style={{background: 'linear-gradient(135deg, rgba(245,158,11,0.2) 0%, rgba(249,115,22,0.2) 100%)'}}>
+                <div className="flex items-start gap-3">
+                  <span className="text-lg">⚡</span>
+                  <div>
+                    <p className="text-sm text-amber-300 font-medium">Suggestion</p>
+                    <p className="text-xs text-amber-200/80 mt-0.5">{topConfusion[1].count} students flagged "{topConfusion[0]}" for help. Consider a quick recap!</p>
                   </div>
-                )}
-              </>
+                </div>
+              </div>
             )}
 
-            {viewMode === 'review' && (
-              <>
-                <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
-                  <div className="flex items-center justify-between mb-3">
-                    <h4 className="font-medium text-white text-sm">👥 Students</h4>
-                    <span className="text-xs text-emerald-400 bg-emerald-500/20 px-2 py-1 rounded-full">
-                      {connectedStudents.length}/{TEST_PARTICIPANTS.length} joined
-                    </span>
-                  </div>
-                  {connectedStudents.length === 0 ? (
-                    <p className="text-slate-400 text-sm text-center py-4">No students have joined yet</p>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-2">
-                      {connectedStudents.map((student, i) => {
-                        const hasParticipated = (student.questionsAsked || 0) > 0;
-                        return (
-                          <div key={i} className={`flex items-center justify-between p-2 rounded-lg ${hasParticipated ? 'bg-emerald-500/10' : 'bg-white/5'}`}>
-                            <span className="text-xs text-slate-300">{student.name}</span>
-                            <span className={`text-xs ${hasParticipated ? 'text-emerald-400' : 'text-slate-500'}`}>
-                              {hasParticipated ? '✓ Active' : '—'}
-                            </span>
-                          </div>
-                        );
-                      })}
+            {flaggedQuestions.length > 0 && (
+              <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
+                <h4 className="font-medium text-white text-sm mb-3">🚩 Flagged Questions</h4>
+                <div className="space-y-2 max-h-32 overflow-y-auto">
+                  {flaggedQuestions.slice(0, 5).map((q) => (
+                    <div key={q.id} className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                      <p className="text-xs text-white">"{q.text}"</p>
+                      <p className="text-xs text-amber-400 mt-1">Topic: {q.topic}</p>
                     </div>
-                  )}
+                  ))}
                 </div>
-
-                {/* Questions - Post Class (filtered to only show actual questions) */}
-                <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
-                  <h4 className="font-medium text-white text-sm mb-3">💬 Questions This Session</h4>
-                  <div className="space-y-2 max-h-60 overflow-y-auto">
-                    {messages.filter(m => m.type === 'student' && isLikelyQuestion(m.text)).length === 0 ? (
-                      <p className="text-slate-400 text-sm text-center py-4">No questions yet</p>
-                    ) : (
-                      messages.filter(m => m.type === 'student' && isLikelyQuestion(m.text)).map((msg) => (
-                        <div key={msg.id} className={`p-3 rounded-xl ${msg.status === 'flagged' ? 'bg-amber-500/10 border border-amber-500/20' : msg.status === 'solved' ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-white/5'}`}>
-                          <p className="text-sm text-slate-300">"{msg.text}"</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            {msg.status && msg.status !== 'pending' && (
-                              <span className={`text-xs px-1.5 py-0.5 rounded ${msg.status === 'solved' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
-                                {msg.status === 'solved' ? '✓ Solved' : '🚩 Flagged'}
-                              </span>
-                            )}
-                            {(!msg.status || msg.status === 'pending') && (
-                              <span className="text-xs px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-400">Pending</span>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Summary Stats */}
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-white/5 border border-white/10 p-3 rounded-xl text-center">
-                    <p className="text-lg font-bold text-white">{questionCount}</p>
-                    <p className="text-xs text-slate-400">Questions</p>
-                  </div>
-                  <div className="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl text-center">
-                    <p className="text-lg font-bold text-emerald-400">{solvedCount}</p>
-                    <p className="text-xs text-emerald-400/70">Solved</p>
-                  </div>
-                  <div className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl text-center">
-                    <p className="text-lg font-bold text-amber-400">{flaggedCount}</p>
-                    <p className="text-xs text-amber-400/70">Flagged</p>
-                  </div>
-                </div>
-              </>
+              </div>
             )}
+          </>
+        )}
+
+        {viewMode === 'review' && (
+          <>
+            <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-medium text-white text-sm">👥 Students</h4>
+                <span className="text-xs text-emerald-400 bg-emerald-500/20 px-2 py-1 rounded-full">
+                  {connectedStudents.length}/{TEST_PARTICIPANTS.length} joined
+                </span>
+              </div>
+              {connectedStudents.length === 0 ? (
+                <p className="text-slate-400 text-sm text-center py-4">No students have joined yet</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {connectedStudents.map((student, i) => {
+                    const hasParticipated = (student.questionsAsked || 0) > 0;
+                    return (
+                      <div key={i} className={`flex items-center justify-between p-2 rounded-lg ${hasParticipated ? 'bg-emerald-500/10' : 'bg-white/5'}`}>
+                        <span className="text-xs text-slate-300">{student.name}</span>
+                        <span className={`text-xs ${hasParticipated ? 'text-emerald-400' : 'text-slate-500'}`}>
+                          {hasParticipated ? '✓ Active' : '—'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
+              <h4 className="font-medium text-white text-sm mb-3">💬 Questions This Session</h4>
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {messages.filter(m => m.type === 'student' && isLikelyQuestion(m.text)).length === 0 ? (
+                  <p className="text-slate-400 text-sm text-center py-4">No questions yet</p>
+                ) : (
+                  messages.filter(m => m.type === 'student' && isLikelyQuestion(m.text)).map((msg) => (
+                    <div key={msg.id} className={`p-3 rounded-xl ${msg.status === 'flagged' ? 'bg-amber-500/10 border border-amber-500/20' : msg.status === 'solved' ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-white/5'}`}>
+                      <p className="text-sm text-slate-300">"{msg.text}"</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        {msg.status && msg.status !== 'pending' && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${msg.status === 'solved' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                            {msg.status === 'solved' ? '✓ Solved' : '🚩 Flagged'}
+                          </span>
+                        )}
+                        {(!msg.status || msg.status === 'pending') && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-400">Pending</span>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-white/5 border border-white/10 p-3 rounded-xl text-center">
+                <p className="text-lg font-bold text-white">{questionCount}</p>
+                <p className="text-xs text-slate-400">Questions</p>
+              </div>
+              <div className="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl text-center">
+                <p className="text-lg font-bold text-emerald-400">{solvedCount}</p>
+                <p className="text-xs text-emerald-400/70">Solved</p>
+              </div>
+              <div className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl text-center">
+                <p className="text-lg font-bold text-amber-400">{flaggedCount}</p>
+                <p className="text-xs text-amber-400/70">Flagged</p>
+              </div>
+            </div>
           </>
         )}
       </div>
