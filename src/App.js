@@ -207,7 +207,6 @@ function StudentView() {
   });
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
-  const [config, setConfig] = useState({ chapter: 'Loading...' });
   const [pendingFeedback, setPendingFeedback] = useState(null);
   const [takenStudents, setTakenStudents] = useState([]);
   const chatEndRef = useRef(null);
@@ -265,12 +264,6 @@ function StudentView() {
         setMessages([]);
         setPendingFeedback(null);
       }
-    });
-
-    const configRef = ref(db, `sessions/${SESSION_ID}/config`);
-    onValue(configRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) setConfig(data);
     });
   }, [currentStudent]);
 
@@ -421,7 +414,7 @@ function StudentView() {
             <h3 className="text-white font-semibold">Class Assistant</h3>
             <div className="flex items-center gap-1.5">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
-              <p className="text-slate-400 text-xs">{currentStudent.name} • {config.chapter || 'Connecting...'}</p>
+              <p className="text-slate-400 text-xs">{currentStudent.name} • Online</p>
             </div>
           </div>
           <a href="#" className="text-slate-500 hover:text-white text-xs px-3 py-1.5 rounded-lg hover:bg-white/10 transition-all">Exit</a>
@@ -745,22 +738,12 @@ function TeacherPage() {
 }
 
 function TeacherView() {
-  const [setupStage, setSetupStage] = useState('upload');
+  const [setupStage, setSetupStage] = useState('live');
   const [viewMode, setViewMode] = useState('live');
-  const [todayChapter, setTodayChapter] = useState('');
-  const [uploadedBook, setUploadedBook] = useState(null);
   const [messages, setMessages] = useState([]);
   const [confusion, setConfusion] = useState({});
   const [flaggedQuestions, setFlaggedQuestions] = useState([]);
   const [connectedStudents, setConnectedStudents] = useState([]);
-
-  const chapters = [
-    { id: 1, name: "Linear Equations", pages: "1-24" },
-    { id: 2, name: "Quadratic Functions", pages: "25-52" },
-    { id: 3, name: "Polynomials", pages: "53-78" },
-    { id: 4, name: "Quadratic Equations", pages: "155-182" },
-    { id: 5, name: "Systems of Equations", pages: "183-210" },
-  ];
 
   useEffect(() => {
     if (setupStage === 'parsing') {
@@ -804,16 +787,6 @@ function TeacherView() {
     });
   }, []);
 
-  const startSession = () => {
-    if (!todayChapter) return;
-    set(ref(db, `sessions/${SESSION_ID}/config`), {
-      chapter: todayChapter,
-      book: uploadedBook,
-      startedAt: Date.now()
-    });
-    setSetupStage('live');
-  };
-
   const resetSession = () => {
     if (!window.confirm('Start a new class session? This will clear all current messages and questions.')) return;
     
@@ -823,13 +796,6 @@ function TeacherView() {
     remove(ref(db, `sessions/${SESSION_ID}/confusion`));
     remove(ref(db, `sessions/${SESSION_ID}/flagged`));
     remove(ref(db, `sessions/${SESSION_ID}/students`));
-    
-    // Update config with new start time
-    set(ref(db, `sessions/${SESSION_ID}/config`), {
-      chapter: todayChapter,
-      book: uploadedBook,
-      startedAt: Date.now()
-    });
     
     // Reset local state
     setMessages([]);
@@ -864,123 +830,30 @@ function TeacherView() {
             </div>
             <div>
               <h3 className="text-white font-semibold">Teacher Dashboard</h3>
-              <p className="text-slate-400 text-xs">Mathematics • {setupStage === 'live' ? todayChapter : 'Setup'}</p>
+              <p className="text-slate-400 text-xs">Mathematics • Live Session</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 ${setupStage === 'live' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/10 text-slate-400'}`}>
-              <div className={`w-1.5 h-1.5 rounded-full ${setupStage === 'live' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`}></div>
-              {setupStage === 'live' ? 'Live' : 'Setup'}
+            <div className="px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 bg-emerald-500/20 text-emerald-400">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
+              Live
             </div>
-            {setupStage === 'live' && (
-              <button 
-                onClick={resetSession}
-                className="text-xs px-3 py-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-all flex items-center gap-1.5"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                New Class
-              </button>
-            )}
+            <button 
+              onClick={resetSession}
+              className="text-xs px-3 py-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-all flex items-center gap-1.5"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              New Class
+            </button>
             <a href="#" className="text-slate-500 hover:text-white text-xs px-3 py-1.5 rounded-lg hover:bg-white/10 transition-all">Exit</a>
           </div>
         </div>
       </div>
       
       <div className="relative flex-1 p-4 space-y-4 overflow-y-auto">
-        {setupStage === 'upload' && (
-          <div className="space-y-4">
-            <div className="text-center">
-              <span className="inline-flex items-center gap-1.5 text-xs bg-violet-500/20 text-violet-300 px-3 py-1.5 rounded-full">One-time setup</span>
-            </div>
-            <div className="bg-white/5 backdrop-blur-sm border border-white/10 p-5 rounded-2xl">
-              <h4 className="font-semibold text-white text-sm mb-1">Upload Course Textbook</h4>
-              <p className="text-xs text-slate-400 mb-4">Upload once, use all year.</p>
-              <div 
-                className="border-2 border-dashed border-white/20 rounded-2xl p-8 text-center hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all cursor-pointer group"
-                onClick={() => { setUploadedBook('Mathematics_Grade9_2024.pdf'); setSetupStage('parsing'); }}
-              >
-                <div className="w-14 h-14 mx-auto mb-3 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform" style={{background: 'linear-gradient(135deg, #fbbf24 0%, #f97316 100%)'}}>
-                  <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                  </svg>
-                </div>
-                <p className="text-white text-sm font-medium">Drop your textbook here</p>
-                <p className="text-slate-500 text-xs mt-1">PDF format • Max 100MB</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {setupStage === 'parsing' && (
-          <div className="space-y-4 py-4">
-            <div className="bg-white/5 border border-white/10 p-6 rounded-2xl text-center">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center shadow-lg" style={{background: 'linear-gradient(135deg, #34d399 0%, #059669 100%)'}}>
-                <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
-              </div>
-              <h4 className="font-semibold text-white mb-1">Analyzing textbook...</h4>
-              <p className="text-xs text-slate-400">Identifying chapters</p>
-            </div>
-          </div>
-        )}
-
-        {setupStage === 'confirm' && (
-          <div className="space-y-4">
-            <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
-              <div className="flex items-center justify-between mb-4">
-                <h4 className="font-semibold text-white text-sm">Chapters Found</h4>
-                <span className="text-xs text-emerald-400 bg-emerald-500/20 px-2.5 py-1 rounded-full">{chapters.length} detected</span>
-              </div>
-              <div className="space-y-1.5 max-h-44 overflow-y-auto">
-                {chapters.map((ch) => (
-                  <div key={ch.id} className="flex items-center gap-3 p-2.5 bg-white/5 rounded-xl">
-                    <span className="w-7 h-7 rounded-lg flex items-center justify-center text-xs text-white font-medium" style={{background: 'linear-gradient(135deg, #475569 0%, #334155 100%)'}}>{ch.id}</span>
-                    <span className="text-sm text-slate-200 flex-1">{ch.name}</span>
-                    <span className="text-xs text-slate-500">p.{ch.pages}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <button 
-              className="w-full py-3.5 rounded-2xl font-semibold text-sm text-white hover:shadow-lg transition-all hover:-translate-y-0.5"
-              style={{background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)'}}
-              onClick={() => setSetupStage('ready')}
-            >
-              Confirm Chapters →
-            </button>
-          </div>
-        )}
-
-        {setupStage === 'ready' && (
-          <div className="space-y-4">
-            <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
-              <h4 className="font-medium text-white text-sm mb-2">Today's Chapter</h4>
-              <select 
-                className="w-full p-3 bg-white/10 border border-white/10 rounded-xl text-sm text-white focus:outline-none"
-                value={todayChapter}
-                onChange={(e) => setTodayChapter(e.target.value)}
-              >
-                <option value="" className="bg-slate-800">Select chapter...</option>
-                {chapters.map((ch) => (
-                  <option key={ch.id} value={ch.name} className="bg-slate-800">Ch {ch.id}: {ch.name}</option>
-                ))}
-              </select>
-            </div>
-            <button 
-              className={`w-full py-3.5 rounded-2xl font-semibold text-sm transition-all ${todayChapter ? 'text-white hover:shadow-lg hover:-translate-y-0.5' : 'bg-white/10 text-slate-500 cursor-not-allowed'}`}
-              style={todayChapter ? {background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)'} : {}}
-              onClick={startSession}
-              disabled={!todayChapter}
-            >
-              Start Class Session →
-            </button>
-          </div>
-        )}
-
-        {setupStage === 'live' && (
-          <>
-            <div className="flex gap-2 p-1 bg-white/10 rounded-xl">
+        <div className="flex gap-2 p-1 bg-white/10 rounded-xl">
               <button onClick={() => setViewMode('live')} className={`flex-1 py-2.5 px-3 rounded-lg text-xs font-semibold transition-all ${viewMode === 'live' ? 'bg-emerald-500 text-white shadow-lg' : 'text-slate-400'}`}>
                 🔴 Live Class
               </button>
