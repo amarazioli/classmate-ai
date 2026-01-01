@@ -27,7 +27,7 @@ const isLikelyQuestion = (text) => {
   const trimmed = text.trim().toLowerCase();
   
   // Check if ends with question mark
-  if (trimmed.endsWith('?')) return true;
+  const hasQuestionMark = trimmed.endsWith('?');
   
   // Check if starts with common question words
   const questionStarters = [
@@ -38,7 +38,10 @@ const isLikelyQuestion = (text) => {
   ];
   
   const firstWord = trimmed.split(/\s+/)[0];
-  return questionStarters.includes(firstWord);
+  const startsWithQuestionWord = questionStarters.includes(firstWord);
+  
+  // Return true if EITHER condition is met (OR logic)
+  return hasQuestionMark || startsWithQuestionWord;
 };
 
 // ============================================
@@ -679,6 +682,28 @@ function TeacherView() {
     setSetupStage('live');
   };
 
+  const resetSession = () => {
+    if (!window.confirm('Start a new class session? This will clear all current messages and questions.')) return;
+    
+    // Clear all session data
+    remove(ref(db, `sessions/${SESSION_ID}/messages`));
+    remove(ref(db, `sessions/${SESSION_ID}/queue`));
+    remove(ref(db, `sessions/${SESSION_ID}/confusion`));
+    remove(ref(db, `sessions/${SESSION_ID}/flagged`));
+    
+    // Update config with new start time
+    set(ref(db, `sessions/${SESSION_ID}/config`), {
+      chapter: todayChapter,
+      book: uploadedBook,
+      startedAt: Date.now()
+    });
+    
+    // Reset local state
+    setMessages([]);
+    setConfusion({});
+    setFlaggedQuestions([]);
+  };
+
   const sortedConfusion = Object.entries(confusion)
     .sort((a, b) => (b[1]?.count || 0) - (a[1]?.count || 0))
     .slice(0, 5);
@@ -713,6 +738,17 @@ function TeacherView() {
               <div className={`w-1.5 h-1.5 rounded-full ${setupStage === 'live' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`}></div>
               {setupStage === 'live' ? 'Live' : 'Setup'}
             </div>
+            {setupStage === 'live' && (
+              <button 
+                onClick={resetSession}
+                className="text-xs px-3 py-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-all flex items-center gap-1.5"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                New Class
+              </button>
+            )}
             <a href="#" className="text-slate-500 hover:text-white text-xs px-3 py-1.5 rounded-lg hover:bg-white/10 transition-all">Exit</a>
           </div>
         </div>
