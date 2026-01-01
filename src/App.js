@@ -175,8 +175,6 @@ function StudentView() {
       if (data) {
         const arr = Object.values(data).sort((a, b) => a.timestamp - b.timestamp);
         setMessages(arr);
-        
-        // Check if latest AI response needs feedback
         const lastMsg = arr[arr.length - 1];
         if (lastMsg && lastMsg.type === 'ai' && !lastMsg.feedbackGiven) {
           setPendingFeedback(lastMsg);
@@ -203,7 +201,7 @@ function StudentView() {
       type: 'student', 
       text: message, 
       timestamp: Date.now(),
-      status: 'pending' // pending, solved, flagged
+      status: 'pending'
     };
     set(msgRef, newMsg);
     set(ref(db, `sessions/${SESSION_ID}/queue/${msgRef.key}`), newMsg);
@@ -213,25 +211,30 @@ function StudentView() {
   const handleFeedback = (feedbackType) => {
     if (!pendingFeedback) return;
     
-    // Find the original student question this AI response was replying to
     const aiMsg = pendingFeedback;
     const studentMsgId = aiMsg.replyTo;
+    const confusionTopic = aiMsg.confusionTopic;
     
-    // Update the AI message to mark feedback given
     update(ref(db, `sessions/${SESSION_ID}/messages/${aiMsg.id}`), {
       feedbackGiven: true,
       feedbackType: feedbackType
     });
 
-    // Update the original student question status
     if (studentMsgId) {
       update(ref(db, `sessions/${SESSION_ID}/messages/${studentMsgId}`), {
-        status: feedbackType // 'solved' or 'flagged'
+        status: feedbackType
       });
 
-      // If flagged, add to flagged questions for teacher
-      if (feedbackType === 'flagged') {
-        // Get the original question text
+      // Only add to confusion matrix if FLAGGED
+      if (feedbackType === 'flagged' && confusionTopic) {
+        // Get current count and increment
+        const confusionRef = ref(db, `sessions/${SESSION_ID}/confusion/${confusionTopic}`);
+        onValue(confusionRef, (snapshot) => {
+          const current = snapshot.val()?.count || 0;
+          set(confusionRef, { count: current + 1 });
+        }, { onlyOnce: true });
+
+        // Also save the flagged question details
         const originalQuestion = messages.find(m => m.id === studentMsgId);
         if (originalQuestion) {
           const flagRef = push(ref(db, `sessions/${SESSION_ID}/flagged`));
@@ -239,6 +242,7 @@ function StudentView() {
             id: flagRef.key,
             questionId: studentMsgId,
             text: originalQuestion.text,
+            topic: confusionTopic,
             timestamp: Date.now(),
             aiResponse: aiMsg.text
           });
@@ -291,7 +295,7 @@ function StudentView() {
           </div>
         )}
         
-        {messages.map((msg, index) => (
+        {messages.map((msg) => (
           <div key={msg.id}>
             <div className={`flex ${msg.type === 'student' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] px-4 py-3 ${
@@ -313,7 +317,6 @@ function StudentView() {
               </div>
             </div>
             
-            {/* Feedback buttons after AI response */}
             {msg.type === 'ai' && pendingFeedback?.id === msg.id && !msg.feedbackGiven && (
               <div className="flex justify-start mt-2 ml-2">
                 <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-3">
@@ -394,7 +397,9 @@ function OperatorView() {
   const [queue, setQueue] = useState([]);
   const [selected, setSelected] = useState(null);
   const [reply, setReply] = useState('');
+  const [selectedTopic, setSelectedTopic] = useState('');
 
+  const topics = ["Quadratic Formula", "Factoring", "Variables", "Graph", "Sign changes", "Steps", "Other"];
   const quickReplies = [
     "Great question! The key is...",
     "Think of it this way...",
@@ -418,6 +423,11 @@ function OperatorView() {
 
   const sendReply = (qId) => {
     if (!reply.trim()) return;
+    if (!selectedTopic) {
+      alert('Please select a topic before sending!');
+      return;
+    }
+    
     const msgRef = push(ref(db, `sessions/${SESSION_ID}/messages`));
     const response = { 
       id: msgRef.key, 
@@ -425,11 +435,13 @@ function OperatorView() {
       text: reply, 
       timestamp: Date.now(), 
       replyTo: qId,
+      confusionTopic: selectedTopic, // Store the topic with the response
       feedbackGiven: false
     };
     set(msgRef, response);
     remove(ref(db, `sessions/${SESSION_ID}/queue/${qId}`));
     setReply('');
+    setSelectedTopic('');
     setSelected(null);
   };
 
@@ -485,7 +497,7 @@ function OperatorView() {
               className={`bg-white/5 backdrop-blur-sm border rounded-2xl p-4 cursor-pointer transition-all ${
                 selected?.id === q.id ? 'border-red-500/50 bg-red-500/10' : 'border-white/10 hover:border-white/20'
               }`}
-              onClick={() => setSelected(q)}
+              onClick={() => { setSelected(q); setSelectedTopic(''); }}
             >
               <div className="flex items-start justify-between gap-2 mb-3">
                 <p className="text-sm text-white flex-1">"{q.text}"</p>
@@ -494,6 +506,27 @@ function OperatorView() {
 
               {selected?.id === q.id && (
                 <div className="mt-3 pt-3 border-t border-white/10">
+                  {/* Topic Selection - REQUIRED */}
+                  <div className="mb-3">
+                    <p className="text-xs text-slate-400 mb-2">Select topic (required):</p>
+                    <div className="flex flex-wrap gap-1">
+                      {topics.map((topic) => (
+                        <button
+                          key={topic}
+                          onClick={(e) => { e.stopPropagation(); setSelectedTopic(topic); }}
+                          className={`px-2 py-1 rounded-lg text-xs transition-all ${
+                            selectedTopic === topic
+                              ? 'bg-amber-500 text-white'
+                              : 'bg-white/10 text-slate-400 hover:bg-white/20'
+                          }`}
+                        >
+                          {topic}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Quick Replies */}
                   <div className="flex flex-wrap gap-1 mb-2">
                     {quickReplies.map((qr, i) => (
                       <button
@@ -505,6 +538,8 @@ function OperatorView() {
                       </button>
                     ))}
                   </div>
+
+                  {/* Reply Input */}
                   <div className="flex gap-2">
                     <input
                       type="text"
@@ -517,12 +552,20 @@ function OperatorView() {
                     />
                     <button
                       onClick={(e) => { e.stopPropagation(); sendReply(q.id); }}
-                      className="px-4 py-2 rounded-xl text-sm font-medium text-white hover:shadow-lg transition-all"
+                      disabled={!selectedTopic}
+                      className={`px-4 py-2 rounded-xl text-sm font-medium text-white transition-all ${
+                        selectedTopic 
+                          ? 'hover:shadow-lg' 
+                          : 'opacity-50 cursor-not-allowed'
+                      }`}
                       style={{background: 'linear-gradient(135deg, #f87171 0%, #dc2626 100%)'}}
                     >
                       Send
                     </button>
                   </div>
+                  {!selectedTopic && (
+                    <p className="text-xs text-amber-400 mt-2">⚠️ Select a topic before sending</p>
+                  )}
                 </div>
               )}
             </div>
@@ -533,7 +576,7 @@ function OperatorView() {
       <div className="relative p-4 border-t border-white/10">
         <div className="bg-blue-500/10 border border-blue-500/30 p-3 rounded-xl flex items-start gap-3">
           <span className="text-lg">💡</span>
-          <p className="text-xs text-blue-300">After you reply, students can mark questions as "Solved" or "Flag for teacher". Only flagged questions appear in the teacher's confusion hotspots.</p>
+          <p className="text-xs text-blue-300">Select a topic before replying. If the student flags the question, only then will it appear in the teacher's confusion matrix.</p>
         </div>
       </div>
     </div>
@@ -559,6 +602,7 @@ function TeacherView() {
   const [todayChapter, setTodayChapter] = useState('');
   const [uploadedBook, setUploadedBook] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [confusion, setConfusion] = useState({});
   const [flaggedQuestions, setFlaggedQuestions] = useState([]);
   const [stats] = useState({ activeStudents: 18, totalStudents: 24 });
 
@@ -591,7 +635,13 @@ function TeacherView() {
       if (data) setMessages(Object.values(data));
     });
 
-    // Listen to flagged questions
+    const confusionRef = ref(db, `sessions/${SESSION_ID}/confusion`);
+    onValue(confusionRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) setConfusion(data);
+      else setConfusion({});
+    });
+
     const flaggedRef = ref(db, `sessions/${SESSION_ID}/flagged`);
     onValue(flaggedRef, (snapshot) => {
       const data = snapshot.val();
@@ -612,6 +662,12 @@ function TeacherView() {
     });
     setSetupStage('live');
   };
+
+  const sortedConfusion = Object.entries(confusion)
+    .sort((a, b) => (b[1]?.count || 0) - (a[1]?.count || 0))
+    .slice(0, 5);
+  const maxConfusion = Math.max(...sortedConfusion.map(([, d]) => d?.count || 0), 1);
+  const topConfusion = sortedConfusion[0];
 
   const questionCount = messages.filter(m => m.type === 'student').length;
   const solvedCount = messages.filter(m => m.type === 'student' && m.status === 'solved').length;
@@ -768,41 +824,64 @@ function TeacherView() {
                   </div>
                 </div>
 
+                {/* CONFUSION MATRIX - Only shows flagged topics */}
                 <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
                   <h4 className="font-medium text-white text-sm mb-3 flex items-center gap-2">
-                    🚩 Flagged Questions
-                    <span className="text-xs text-slate-500 font-normal">(Students need help)</span>
+                    🔥 Confusion Hotspots
+                    <span className="text-xs text-slate-500 font-normal">(from flagged questions)</span>
                   </h4>
-                  {flaggedQuestions.length === 0 ? (
-                    <div className="text-center py-6">
-                      <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-emerald-500/10 flex items-center justify-center">
-                        <svg className="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </div>
-                      <p className="text-slate-400 text-sm">No flagged questions!</p>
-                      <p className="text-slate-500 text-xs mt-1">Students are finding the AI helpful</p>
+                  {sortedConfusion.length === 0 ? (
+                    <div className="text-center py-4">
+                      <p className="text-slate-400 text-sm">No confusion data yet</p>
+                      <p className="text-slate-500 text-xs mt-1">Topics appear when students flag questions</p>
                     </div>
                   ) : (
-                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {flaggedQuestions.map((q) => (
-                        <div key={q.id} className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl">
-                          <p className="text-sm text-white mb-1">"{q.text}"</p>
-                          <p className="text-xs text-slate-500">AI said: "{q.aiResponse?.substring(0, 50)}..."</p>
+                    <div className="space-y-3">
+                      {sortedConfusion.map(([topic, data], i) => (
+                        <div key={topic}>
+                          <div className="flex justify-between text-xs mb-1.5">
+                            <span className="text-slate-300">{topic}</span>
+                            <span className="text-slate-500">{data?.count || 0} flagged</span>
+                          </div>
+                          <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full rounded-full transition-all duration-500"
+                              style={{
+                                width: `${((data?.count || 0) / maxConfusion) * 100}%`,
+                                background: i === 0 ? 'linear-gradient(90deg, #ef4444, #f87171)' : i === 1 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : 'linear-gradient(90deg, #10b981, #34d399)'
+                              }}
+                            />
+                          </div>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
 
-                {flaggedCount >= 2 && (
+                {/* Suggestion */}
+                {topConfusion && topConfusion[1]?.count >= 2 && (
                   <div className="p-4 rounded-2xl border border-amber-500/30" style={{background: 'linear-gradient(135deg, rgba(245,158,11,0.2) 0%, rgba(249,115,22,0.2) 100%)'}}>
                     <div className="flex items-start gap-3">
                       <span className="text-lg">⚡</span>
                       <div>
                         <p className="text-sm text-amber-300 font-medium">Suggestion</p>
-                        <p className="text-xs text-amber-200/80 mt-0.5">{flaggedCount} questions flagged by students. Consider pausing to address these topics!</p>
+                        <p className="text-xs text-amber-200/80 mt-0.5">{topConfusion[1].count} students flagged "{topConfusion[0]}" for help. Consider a quick recap!</p>
                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Flagged Questions List */}
+                {flaggedQuestions.length > 0 && (
+                  <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
+                    <h4 className="font-medium text-white text-sm mb-3">🚩 Flagged Questions</h4>
+                    <div className="space-y-2 max-h-32 overflow-y-auto">
+                      {flaggedQuestions.slice(0, 5).map((q) => (
+                        <div key={q.id} className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                          <p className="text-xs text-white">"{q.text}"</p>
+                          <p className="text-xs text-amber-400 mt-1">Topic: {q.topic}</p>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -828,6 +907,7 @@ function TeacherView() {
                   </div>
                 </div>
 
+                {/* ALL Questions - Post Class */}
                 <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
                   <h4 className="font-medium text-white text-sm mb-3">💬 All Questions This Session</h4>
                   <div className="space-y-2 max-h-60 overflow-y-auto">
@@ -853,6 +933,7 @@ function TeacherView() {
                   </div>
                 </div>
 
+                {/* Summary Stats */}
                 <div className="grid grid-cols-3 gap-3">
                   <div className="bg-white/5 border border-white/10 p-3 rounded-xl text-center">
                     <p className="text-lg font-bold text-white">{questionCount}</p>
