@@ -20,6 +20,28 @@ const db = getDatabase(app);
 const SESSION_ID = "class-session-1";
 
 // ============================================
+// HELPER FUNCTIONS
+// ============================================
+const isLikelyQuestion = (text) => {
+  if (!text) return false;
+  const trimmed = text.trim().toLowerCase();
+  
+  // Check if ends with question mark
+  if (trimmed.endsWith('?')) return true;
+  
+  // Check if starts with common question words
+  const questionStarters = [
+    'what', 'why', 'how', 'when', 'where', 'who', 'which', 'whose',
+    'is', 'are', 'was', 'were', 'do', 'does', 'did', 'can', 'could',
+    'would', 'should', 'will', 'shall', 'may', 'might', 'have', 'has',
+    'am', 'isn\'t', 'aren\'t', 'wasn\'t', 'weren\'t', 'don\'t', 'doesn\'t'
+  ];
+  
+  const firstWord = trimmed.split(/\s+/)[0];
+  return questionStarters.includes(firstWord);
+};
+
+// ============================================
 // MAIN APP
 // ============================================
 export default function App() {
@@ -225,16 +247,13 @@ function StudentView() {
         status: feedbackType
       });
 
-      // Only add to confusion matrix if FLAGGED
       if (feedbackType === 'flagged' && confusionTopic) {
-        // Get current count and increment
         const confusionRef = ref(db, `sessions/${SESSION_ID}/confusion/${confusionTopic}`);
         onValue(confusionRef, (snapshot) => {
           const current = snapshot.val()?.count || 0;
           set(confusionRef, { count: current + 1 });
         }, { onlyOnce: true });
 
-        // Also save the flagged question details
         const originalQuestion = messages.find(m => m.id === studentMsgId);
         if (originalQuestion) {
           const flagRef = push(ref(db, `sessions/${SESSION_ID}/flagged`));
@@ -435,7 +454,7 @@ function OperatorView() {
       text: reply, 
       timestamp: Date.now(), 
       replyTo: qId,
-      confusionTopic: selectedTopic, // Store the topic with the response
+      confusionTopic: selectedTopic,
       feedbackGiven: false
     };
     set(msgRef, response);
@@ -506,7 +525,6 @@ function OperatorView() {
 
               {selected?.id === q.id && (
                 <div className="mt-3 pt-3 border-t border-white/10">
-                  {/* Topic Selection - REQUIRED */}
                   <div className="mb-3">
                     <p className="text-xs text-slate-400 mb-2">Select topic (required):</p>
                     <div className="flex flex-wrap gap-1">
@@ -526,7 +544,6 @@ function OperatorView() {
                     </div>
                   </div>
 
-                  {/* Quick Replies */}
                   <div className="flex flex-wrap gap-1 mb-2">
                     {quickReplies.map((qr, i) => (
                       <button
@@ -539,7 +556,6 @@ function OperatorView() {
                     ))}
                   </div>
 
-                  {/* Reply Input */}
                   <div className="flex gap-2">
                     <input
                       type="text"
@@ -669,7 +685,9 @@ function TeacherView() {
   const maxConfusion = Math.max(...sortedConfusion.map(([, d]) => d?.count || 0), 1);
   const topConfusion = sortedConfusion[0];
 
-  const questionCount = messages.filter(m => m.type === 'student').length;
+  // Filter to only count actual questions
+  const questionCount = messages.filter(m => m.type === 'student' && isLikelyQuestion(m.text)).length;
+  const allStudentMsgCount = messages.filter(m => m.type === 'student').length;
   const solvedCount = messages.filter(m => m.type === 'student' && m.status === 'solved').length;
   const flaggedCount = flaggedQuestions.length;
 
@@ -701,7 +719,6 @@ function TeacherView() {
       </div>
       
       <div className="relative flex-1 p-4 space-y-4 overflow-y-auto">
-        {/* Setup stages */}
         {setupStage === 'upload' && (
           <div className="space-y-4">
             <div className="text-center">
@@ -791,7 +808,6 @@ function TeacherView() {
           </div>
         )}
 
-        {/* Live stage */}
         {setupStage === 'live' && (
           <>
             <div className="flex gap-2 p-1 bg-white/10 rounded-xl">
@@ -824,7 +840,6 @@ function TeacherView() {
                   </div>
                 </div>
 
-                {/* CONFUSION MATRIX - Only shows flagged topics */}
                 <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
                   <h4 className="font-medium text-white text-sm mb-3 flex items-center gap-2">
                     🔥 Confusion Hotspots
@@ -858,7 +873,6 @@ function TeacherView() {
                   )}
                 </div>
 
-                {/* Suggestion */}
                 {topConfusion && topConfusion[1]?.count >= 2 && (
                   <div className="p-4 rounded-2xl border border-amber-500/30" style={{background: 'linear-gradient(135deg, rgba(245,158,11,0.2) 0%, rgba(249,115,22,0.2) 100%)'}}>
                     <div className="flex items-start gap-3">
@@ -871,7 +885,6 @@ function TeacherView() {
                   </div>
                 )}
 
-                {/* Flagged Questions List */}
                 {flaggedQuestions.length > 0 && (
                   <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
                     <h4 className="font-medium text-white text-sm mb-3">🚩 Flagged Questions</h4>
@@ -907,14 +920,14 @@ function TeacherView() {
                   </div>
                 </div>
 
-                {/* ALL Questions - Post Class */}
+                {/* Questions - Post Class (filtered to only show actual questions) */}
                 <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
-                  <h4 className="font-medium text-white text-sm mb-3">💬 All Questions This Session</h4>
+                  <h4 className="font-medium text-white text-sm mb-3">💬 Questions This Session</h4>
                   <div className="space-y-2 max-h-60 overflow-y-auto">
-                    {messages.filter(m => m.type === 'student').length === 0 ? (
+                    {messages.filter(m => m.type === 'student' && isLikelyQuestion(m.text)).length === 0 ? (
                       <p className="text-slate-400 text-sm text-center py-4">No questions yet</p>
                     ) : (
-                      messages.filter(m => m.type === 'student').map((msg) => (
+                      messages.filter(m => m.type === 'student' && isLikelyQuestion(m.text)).map((msg) => (
                         <div key={msg.id} className={`p-3 rounded-xl ${msg.status === 'flagged' ? 'bg-amber-500/10 border border-amber-500/20' : msg.status === 'solved' ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-white/5'}`}>
                           <p className="text-sm text-slate-300">"{msg.text}"</p>
                           <div className="flex items-center gap-2 mt-1">
@@ -937,7 +950,7 @@ function TeacherView() {
                 <div className="grid grid-cols-3 gap-3">
                   <div className="bg-white/5 border border-white/10 p-3 rounded-xl text-center">
                     <p className="text-lg font-bold text-white">{questionCount}</p>
-                    <p className="text-xs text-slate-400">Total</p>
+                    <p className="text-xs text-slate-400">Questions</p>
                   </div>
                   <div className="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl text-center">
                     <p className="text-lg font-bold text-emerald-400">{solvedCount}</p>
