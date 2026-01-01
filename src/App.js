@@ -19,6 +19,20 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const SESSION_ID = "class-session-1";
 
+// Pre-populated test participants for WoZ testing
+const TEST_PARTICIPANTS = [
+  { id: "emma", name: "Emma V." },
+  { id: "lucas", name: "Lucas D." },
+  { id: "sophie", name: "Sophie M." },
+  { id: "noah", name: "Noah B." },
+  { id: "mila", name: "Mila K." },
+  { id: "daan", name: "Daan J." },
+  { id: "julia", name: "Julia W." },
+  { id: "sem", name: "Sem P." },
+  { id: "lisa", name: "Lisa H." },
+  { id: "max", name: "Max R." },
+];
+
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
@@ -187,25 +201,67 @@ function StudentPage() {
 }
 
 function StudentView() {
+  const [currentStudent, setCurrentStudent] = useState(() => {
+    const saved = sessionStorage.getItem('classmate_student');
+    return saved ? JSON.parse(saved) : null;
+  });
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [config, setConfig] = useState({ chapter: 'Loading...' });
   const [pendingFeedback, setPendingFeedback] = useState(null);
+  const [takenStudents, setTakenStudents] = useState([]);
   const chatEndRef = useRef(null);
+
+  // Listen for which students are already taken
+  useEffect(() => {
+    const studentsRef = ref(db, `sessions/${SESSION_ID}/students`);
+    onValue(studentsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        setTakenStudents(Object.keys(data));
+      } else {
+        setTakenStudents([]);
+        // If students were cleared (new session), reset current student
+        if (currentStudent) {
+          setCurrentStudent(null);
+          sessionStorage.removeItem('classmate_student');
+        }
+      }
+    });
+  }, []);
+
+  // Register student as active when they join
+  const joinAsStudent = (student) => {
+    setCurrentStudent(student);
+    sessionStorage.setItem('classmate_student', JSON.stringify(student));
+    
+    // Register in Firebase
+    set(ref(db, `sessions/${SESSION_ID}/students/${student.id}`), {
+      name: student.name,
+      joinedAt: Date.now(),
+      active: true
+    });
+  };
 
   useEffect(() => {
     const messagesRef = ref(db, `sessions/${SESSION_ID}/messages`);
     onValue(messagesRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
+        // Filter messages to only show current student's messages and AI responses to them
         const arr = Object.values(data).sort((a, b) => a.timestamp - b.timestamp);
-        setMessages(arr);
-        const lastMsg = arr[arr.length - 1];
-        if (lastMsg && lastMsg.type === 'ai' && !lastMsg.feedbackGiven) {
-          setPendingFeedback(lastMsg);
+        if (currentStudent) {
+          const filtered = arr.filter(m => 
+            m.studentId === currentStudent.id || 
+            (m.type === 'ai' && arr.find(q => q.id === m.replyTo)?.studentId === currentStudent.id)
+          );
+          setMessages(filtered);
+          const lastMsg = filtered[filtered.length - 1];
+          if (lastMsg && lastMsg.type === 'ai' && !lastMsg.feedbackGiven) {
+            setPendingFeedback(lastMsg);
+          }
         }
       } else {
-        // Reset when data is cleared (new class session)
         setMessages([]);
         setPendingFeedback(null);
       }
@@ -216,24 +272,33 @@ function StudentView() {
       const data = snapshot.val();
       if (data) setConfig(data);
     });
-  }, []);
+  }, [currentStudent]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, pendingFeedback]);
 
   const sendMessage = () => {
-    if (!message.trim()) return;
+    if (!message.trim() || !currentStudent) return;
     const msgRef = push(ref(db, `sessions/${SESSION_ID}/messages`));
     const newMsg = { 
       id: msgRef.key, 
       type: 'student', 
       text: message, 
       timestamp: Date.now(),
-      status: 'pending'
+      status: 'pending',
+      studentId: currentStudent.id,
+      studentName: currentStudent.name
     };
     set(msgRef, newMsg);
     set(ref(db, `sessions/${SESSION_ID}/queue/${msgRef.key}`), newMsg);
+    
+    // Update student's last activity
+    update(ref(db, `sessions/${SESSION_ID}/students/${currentStudent.id}`), {
+      lastActivity: Date.now(),
+      questionsAsked: (messages.filter(m => m.type === 'student').length + 1)
+    });
+    
     setMessage('');
   };
 
@@ -270,7 +335,9 @@ function StudentView() {
             text: originalQuestion.text,
             topic: confusionTopic,
             timestamp: Date.now(),
-            aiResponse: aiMsg.text
+            aiResponse: aiMsg.text,
+            studentId: currentStudent?.id,
+            studentName: currentStudent?.name
           });
         }
       }
@@ -285,6 +352,59 @@ function StudentView() {
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
     return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
+
+  // Student selection screen
+  if (!currentStudent) {
+    const availableStudents = TEST_PARTICIPANTS.filter(s => !takenStudents.includes(s.id));
+    
+    return (
+      <div className="relative h-full flex flex-col items-center justify-center p-6">
+        <div className="absolute inset-0 opacity-30 pointer-events-none" style={{background: 'radial-gradient(circle at 30% 20%, rgba(59, 130, 246, 0.3) 0%, transparent 50%)'}}></div>
+        
+        <div className="relative w-full max-w-sm">
+          <div className="text-center mb-6">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center shadow-lg" style={{background: 'linear-gradient(135deg, #60a5fa 0%, #2563eb 100%)'}}>
+              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-bold text-white mb-1">Join Class</h2>
+            <p className="text-slate-400 text-sm">Select your name to continue</p>
+          </div>
+          
+          <div className="space-y-2 max-h-80 overflow-y-auto">
+            {availableStudents.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-slate-400">All spots are taken</p>
+                <p className="text-slate-500 text-sm mt-1">Please wait for a new session</p>
+              </div>
+            ) : (
+              availableStudents.map((student) => (
+                <button
+                  key={student.id}
+                  onClick={() => joinAsStudent(student)}
+                  className="w-full p-4 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-blue-500/50 rounded-xl text-left transition-all group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-medium">
+                      {student.name.charAt(0)}
+                    </div>
+                    <span className="text-white font-medium group-hover:text-blue-400 transition-colors">{student.name}</span>
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+          
+          {takenStudents.length > 0 && (
+            <p className="text-center text-slate-500 text-xs mt-4">
+              {takenStudents.length} student{takenStudents.length !== 1 ? 's' : ''} already joined
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative h-full flex flex-col">
@@ -301,7 +421,7 @@ function StudentView() {
             <h3 className="text-white font-semibold">Class Assistant</h3>
             <div className="flex items-center gap-1.5">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
-              <p className="text-slate-400 text-xs">Anonymous • {config.chapter || 'Connecting...'}</p>
+              <p className="text-slate-400 text-xs">{currentStudent.name} • {config.chapter || 'Connecting...'}</p>
             </div>
           </div>
           <a href="#" className="text-slate-500 hover:text-white text-xs px-3 py-1.5 rounded-lg hover:bg-white/10 transition-all">Exit</a>
@@ -399,7 +519,7 @@ function StudentView() {
           <svg className="w-3 h-3 text-slate-500" fill="currentColor" viewBox="0 0 20 20">
             <path fillRule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z" clipRule="evenodd" />
           </svg>
-          <p className="text-xs text-slate-500">Your questions are anonymous</p>
+          <p className="text-xs text-slate-500">Anonymous to other students</p>
         </div>
       </div>
     </div>
@@ -526,7 +646,12 @@ function OperatorView() {
               onClick={() => { setSelected(q); setSelectedTopic(''); }}
             >
               <div className="flex items-start justify-between gap-2 mb-3">
-                <p className="text-sm text-white flex-1">"{q.text}"</p>
+                <div className="flex-1">
+                  <p className="text-sm text-white">"{q.text}"</p>
+                  {q.studentName && (
+                    <p className="text-xs text-slate-500 mt-1">— {q.studentName}</p>
+                  )}
+                </div>
                 <span className="text-xs text-slate-500 whitespace-nowrap">{formatTime(q.timestamp)}</span>
               </div>
 
@@ -627,7 +752,7 @@ function TeacherView() {
   const [messages, setMessages] = useState([]);
   const [confusion, setConfusion] = useState({});
   const [flaggedQuestions, setFlaggedQuestions] = useState([]);
-  const [stats] = useState({ activeStudents: 18, totalStudents: 24 });
+  const [connectedStudents, setConnectedStudents] = useState([]);
 
   const chapters = [
     { id: 1, name: "Linear Equations", pages: "1-24" },
@@ -635,13 +760,6 @@ function TeacherView() {
     { id: 3, name: "Polynomials", pages: "53-78" },
     { id: 4, name: "Quadratic Equations", pages: "155-182" },
     { id: 5, name: "Systems of Equations", pages: "183-210" },
-  ];
-
-  const studentEngagement = [
-    { name: "Emma V.", active: true }, { name: "Lucas D.", active: true },
-    { name: "Sophie M.", active: true }, { name: "Noah B.", active: false },
-    { name: "Mila K.", active: true }, { name: "Daan J.", active: true },
-    { name: "Julia W.", active: false }, { name: "Sem P.", active: true },
   ];
 
   useEffect(() => {
@@ -674,6 +792,16 @@ function TeacherView() {
         setFlaggedQuestions([]);
       }
     });
+
+    const studentsRef = ref(db, `sessions/${SESSION_ID}/students`);
+    onValue(studentsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        setConnectedStudents(Object.values(data));
+      } else {
+        setConnectedStudents([]);
+      }
+    });
   }, []);
 
   const startSession = () => {
@@ -694,6 +822,7 @@ function TeacherView() {
     remove(ref(db, `sessions/${SESSION_ID}/queue`));
     remove(ref(db, `sessions/${SESSION_ID}/confusion`));
     remove(ref(db, `sessions/${SESSION_ID}/flagged`));
+    remove(ref(db, `sessions/${SESSION_ID}/students`));
     
     // Update config with new start time
     set(ref(db, `sessions/${SESSION_ID}/config`), {
@@ -706,6 +835,7 @@ function TeacherView() {
     setMessages([]);
     setConfusion({});
     setFlaggedQuestions([]);
+    setConnectedStudents([]);
   };
 
   const sortedConfusion = Object.entries(confusion)
@@ -863,7 +993,7 @@ function TeacherView() {
               <>
                 <div className="grid grid-cols-4 gap-2">
                   <div className="bg-white/5 border border-white/10 p-3 rounded-2xl text-center">
-                    <p className="text-xl font-bold" style={{background: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{stats.totalStudents}</p>
+                    <p className="text-xl font-bold" style={{background: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>{connectedStudents.length}</p>
                     <p className="text-xs text-slate-400 mt-0.5">Students</p>
                   </div>
                   <div className="bg-white/5 border border-white/10 p-3 rounded-2xl text-center">
@@ -932,7 +1062,10 @@ function TeacherView() {
                       {flaggedQuestions.slice(0, 5).map((q) => (
                         <div key={q.id} className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
                           <p className="text-xs text-white">"{q.text}"</p>
-                          <p className="text-xs text-amber-400 mt-1">Topic: {q.topic}</p>
+                          <div className="flex items-center justify-between mt-1">
+                            <p className="text-xs text-amber-400">Topic: {q.topic}</p>
+                            {q.studentName && <p className="text-xs text-slate-500">{q.studentName}</p>}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -945,19 +1078,23 @@ function TeacherView() {
               <>
                 <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
                   <div className="flex items-center justify-between mb-3">
-                    <h4 className="font-medium text-white text-sm">👥 Engagement</h4>
+                    <h4 className="font-medium text-white text-sm">👥 Students</h4>
                     <span className="text-xs text-emerald-400 bg-emerald-500/20 px-2 py-1 rounded-full">
-                      {studentEngagement.filter(s => s.active).length}/{studentEngagement.length} active
+                      {connectedStudents.length}/{TEST_PARTICIPANTS.length} joined
                     </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {studentEngagement.map((student, i) => (
-                      <div key={i} className={`flex items-center justify-between p-2 rounded-lg ${student.active ? 'bg-emerald-500/10' : 'bg-white/5'}`}>
-                        <span className="text-xs text-slate-300">{student.name}</span>
-                        <span className={`text-xs ${student.active ? 'text-emerald-400' : 'text-slate-500'}`}>{student.active ? '✓' : '—'}</span>
-                      </div>
-                    ))}
-                  </div>
+                  {connectedStudents.length === 0 ? (
+                    <p className="text-slate-400 text-sm text-center py-4">No students have joined yet</p>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      {connectedStudents.map((student, i) => (
+                        <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-emerald-500/10">
+                          <span className="text-xs text-slate-300">{student.name}</span>
+                          <span className="text-xs text-emerald-400">{student.questionsAsked || 0} Q</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Questions - Post Class (filtered to only show actual questions) */}
@@ -970,15 +1107,18 @@ function TeacherView() {
                       messages.filter(m => m.type === 'student' && isLikelyQuestion(m.text)).map((msg) => (
                         <div key={msg.id} className={`p-3 rounded-xl ${msg.status === 'flagged' ? 'bg-amber-500/10 border border-amber-500/20' : msg.status === 'solved' ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-white/5'}`}>
                           <p className="text-sm text-slate-300">"{msg.text}"</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            {msg.status && msg.status !== 'pending' && (
-                              <span className={`text-xs px-1.5 py-0.5 rounded ${msg.status === 'solved' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
-                                {msg.status === 'solved' ? '✓ Solved' : '🚩 Flagged'}
-                              </span>
-                            )}
-                            {(!msg.status || msg.status === 'pending') && (
-                              <span className="text-xs px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-400">Pending</span>
-                            )}
+                          <div className="flex items-center justify-between mt-1">
+                            <div className="flex items-center gap-2">
+                              {msg.status && msg.status !== 'pending' && (
+                                <span className={`text-xs px-1.5 py-0.5 rounded ${msg.status === 'solved' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                                  {msg.status === 'solved' ? '✓ Solved' : '🚩 Flagged'}
+                                </span>
+                              )}
+                              {(!msg.status || msg.status === 'pending') && (
+                                <span className="text-xs px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-400">Pending</span>
+                              )}
+                            </div>
+                            {msg.studentName && <span className="text-xs text-slate-500">{msg.studentName}</span>}
                           </div>
                         </div>
                       ))
