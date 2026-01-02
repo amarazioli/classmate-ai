@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getDatabase, ref, onValue, push, set, remove, update } from 'firebase/database';
+import { getDatabase, ref, onValue, push, set, remove, update, runTransaction } from 'firebase/database';
 
 // ============================================
 // FIREBASE CONFIGURATION
@@ -297,11 +297,11 @@ function StudentView() {
 
   const handleFeedback = (feedbackType) => {
     if (!pendingFeedback) return;
-    
+
     const aiMsg = pendingFeedback;
     const studentMsgId = aiMsg.replyTo;
     const confusionTopic = aiMsg.confusionTopic;
-    
+
     update(ref(db, `sessions/${SESSION_ID}/messages/${aiMsg.id}`), {
       feedbackGiven: true,
       feedbackType: feedbackType
@@ -313,29 +313,41 @@ function StudentView() {
       });
 
       if (feedbackType === 'flagged' && confusionTopic) {
+        // FIX 1: Use atomic transaction instead of read-then-write
         const confusionRef = ref(db, `sessions/${SESSION_ID}/confusion/${confusionTopic}`);
-        onValue(confusionRef, (snapshot) => {
-          const current = snapshot.val()?.count || 0;
-          set(confusionRef, { count: current + 1 });
-        }, { onlyOnce: true });
+        runTransaction(confusionRef, (current) => {
+          if (current) {
+            return { count: (current.count || 0) + 1 };
+          } else {
+            return { count: 1 };
+          }
+        }).catch((error) => {
+          console.error('Failed to update confusion counter:', error);
+        });
 
-        const originalQuestion = messages.find(m => m.id === studentMsgId);
-        if (originalQuestion) {
-          const flagRef = push(ref(db, `sessions/${SESSION_ID}/flagged`));
-          set(flagRef, {
-            id: flagRef.key,
-            questionId: studentMsgId,
-            text: originalQuestion.text,
-            topic: confusionTopic,
-            timestamp: Date.now(),
-            aiResponse: aiMsg.text,
-            studentId: currentStudent?.id,
-            studentName: currentStudent?.name
-          });
-        }
+        // FIX 2: Read original question from Firebase instead of local state
+        const questionRef = ref(db, `sessions/${SESSION_ID}/messages/${studentMsgId}`);
+        onValue(questionRef, (snapshot) => {
+          const originalQuestion = snapshot.val();
+          if (originalQuestion) {
+            const flagRef = push(ref(db, `sessions/${SESSION_ID}/flagged`));
+            set(flagRef, {
+              id: flagRef.key,
+              questionId: studentMsgId,
+              text: originalQuestion.text,
+              topic: confusionTopic,
+              timestamp: Date.now(),
+              aiResponse: aiMsg.text,
+              studentId: currentStudent?.id,
+              studentName: currentStudent?.name
+            }).catch((error) => {
+              console.error('Failed to create flagged entry:', error);
+            });
+          }
+        }, { onlyOnce: true });
       }
     }
-    
+
     setPendingFeedback(null);
   };
 
