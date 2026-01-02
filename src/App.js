@@ -206,6 +206,7 @@ function StudentView() {
   const [messages, setMessages] = useState([]);
   const [pendingFeedback, setPendingFeedback] = useState(null);
   const [takenStudents, setTakenStudents] = useState([]);
+  const [isWaitingForReply, setIsWaitingForReply] = useState(false);
   const chatEndRef = useRef(null);
 
   useEffect(() => {
@@ -246,7 +247,15 @@ function StudentView() {
             (m.type === 'ai' && arr.find(q => q.id === m.replyTo)?.studentId === currentStudent.id)
           );
           setMessages(filtered);
+          
+          // Check if last message is from student (waiting for reply)
           const lastMsg = filtered[filtered.length - 1];
+          if (lastMsg && lastMsg.type === 'student') {
+            setIsWaitingForReply(true);
+          } else {
+            setIsWaitingForReply(false);
+          }
+          
           if (lastMsg && lastMsg.type === 'ai' && !lastMsg.feedbackGiven) {
             setPendingFeedback(lastMsg);
           }
@@ -254,13 +263,14 @@ function StudentView() {
       } else {
         setMessages([]);
         setPendingFeedback(null);
+        setIsWaitingForReply(false);
       }
     });
   }, [currentStudent]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, pendingFeedback]);
+  }, [messages, pendingFeedback, isWaitingForReply]);
 
   const sendMessage = () => {
     if (!message.trim() || !currentStudent) return;
@@ -475,6 +485,19 @@ function StudentView() {
             )}
           </div>
         ))}
+        
+        {isWaitingForReply && (
+          <div className="flex justify-start">
+            <div className="px-4 py-3 backdrop-blur-sm border border-white/10 rounded-2xl rounded-tl-md" style={{background: 'rgba(255,255,255,0.1)'}}>
+              <div className="flex items-center gap-1">
+                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
+                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
+                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
+              </div>
+            </div>
+          </div>
+        )}
+        
         <div ref={chatEndRef} />
       </div>
       
