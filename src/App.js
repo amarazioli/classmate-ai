@@ -274,24 +274,36 @@ function StudentView() {
 
   const sendMessage = () => {
     if (!message.trim() || !currentStudent) return;
+
+    // NUEVO: Detectar si es un follow-up
+    const studentQuestions = messages.filter(
+      m => m.type === 'student' && m.studentId === currentStudent.id
+    ).sort((a, b) => b.timestamp - a.timestamp);
+
+    const lastQuestion = studentQuestions[0];
+    const isFollowUp = !!(lastQuestion && (Date.now() - lastQuestion.timestamp) < 120000); // 2 minutos
+
     const msgRef = push(ref(db, `sessions/${SESSION_ID}/messages`));
-    const newMsg = { 
-      id: msgRef.key, 
-      type: 'student', 
-      text: message, 
+    const newMsg = {
+      id: msgRef.key,
+      type: 'student',
+      text: message,
       timestamp: Date.now(),
       status: 'pending',
       studentId: currentStudent.id,
-      studentName: currentStudent.name
+      studentName: currentStudent.name,
+      // NUEVO: Metadata de follow-up
+      isFollowUp: isFollowUp,
+      followsUpOn: isFollowUp ? lastQuestion.id : ''
     };
     set(msgRef, newMsg);
     set(ref(db, `sessions/${SESSION_ID}/queue/${msgRef.key}`), newMsg);
-    
+
     update(ref(db, `sessions/${SESSION_ID}/students/${currentStudent.id}`), {
       lastActivity: Date.now(),
       questionsAsked: (messages.filter(m => m.type === 'student').length + 1)
     });
-    
+
     setMessage('');
   };
 
@@ -562,6 +574,7 @@ function OperatorView() {
   const [selected, setSelected] = useState(null);
   const [reply, setReply] = useState('');
   const [selectedTopic, setSelectedTopic] = useState('');
+  const [messages, setMessages] = useState([]); // NUEVO: Para detectar duplicados
 
   const topics = ["Quadratic Formula", "Factoring", "Variables", "Graph", "Sign changes", "Steps", "Other"];
   const quickReplies = [
@@ -572,6 +585,7 @@ function OperatorView() {
     "Let me explain step by step..."
   ];
 
+  // Listener para queue
   useEffect(() => {
     const queueRef = ref(db, `sessions/${SESSION_ID}/queue`);
     onValue(queueRef, (snapshot) => {
@@ -585,15 +599,58 @@ function OperatorView() {
     });
   }, []);
 
+  // NUEVO: Listener para mensajes (detectar duplicados)
+  useEffect(() => {
+    const messagesRef = ref(db, `sessions/${SESSION_ID}/messages`);
+    onValue(messagesRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const arr = Object.values(data);
+        setMessages(arr);
+      } else {
+        setMessages([]);
+      }
+    });
+  }, []);
+
+  // NUEVO: Detectar preguntas similares (duplicados)
+  const getSimilarQuestions = (questionText) => {
+    const words = questionText.toLowerCase().split(' ').filter(w => w.length > 3); // Ignorar palabras cortas
+    const threshold = 0.5; // 50% de similitud
+
+    return messages.filter(msg => {
+      if (msg.type !== 'student') return false;
+
+      const msgWords = msg.text.toLowerCase().split(' ').filter(w => w.length > 3);
+      const overlap = words.filter(w => msgWords.includes(w)).length;
+      const similarity = overlap / Math.max(words.length, msgWords.length);
+
+      return similarity >= threshold && msg.text !== questionText; // Excluir la misma pregunta
+    });
+  };
+
+  // NUEVO: Reutilizar respuesta de pregunta similar
+  const reusePreviousAnswer = (currentQuestionId, previousQuestion) => {
+    // Buscar la respuesta AI a la pregunta similar
+    const previousAnswer = messages.find(m =>
+      m.type === 'ai' && m.replyTo === previousQuestion.id
+    );
+
+    if (previousAnswer) {
+      setReply(previousAnswer.text);
+      setSelectedTopic(previousAnswer.confusionTopic || '');
+    }
+  };
+
   const sendReply = (qId) => {
     if (!reply.trim()) return;
-    
+
     const msgRef = push(ref(db, `sessions/${SESSION_ID}/messages`));
-    const response = { 
-      id: msgRef.key, 
-      type: 'ai', 
-      text: reply, 
-      timestamp: Date.now(), 
+    const response = {
+      id: msgRef.key,
+      type: 'ai',
+      text: reply,
+      timestamp: Date.now(),
       replyTo: qId,
       confusionTopic: selectedTopic || null,
       feedbackGiven: false
@@ -651,23 +708,61 @@ function OperatorView() {
             <p className="text-slate-400 text-sm">Questions will appear here in real-time</p>
           </div>
         ) : (
-          queue.map((q) => (
-            <div 
-              key={q.id}
-              className={`bg-white/5 backdrop-blur-sm border rounded-2xl p-4 cursor-pointer transition-all ${
-                selected?.id === q.id ? 'border-red-500/50 bg-red-500/10' : 'border-white/10 hover:border-white/20'
-              }`}
-              onClick={() => { setSelected(q); setSelectedTopic(''); }}
-            >
-              <div className="flex items-start justify-between gap-2 mb-3">
-                <div className="flex-1">
-                  <p className="text-sm text-white">"{q.text}"</p>
-                  {q.studentName && (
-                    <p className="text-xs text-slate-500 mt-1">— {q.studentName}</p>
-                  )}
+          queue.map((q) => {
+            // NUEVO: Detectar duplicados para esta pregunta
+            const similarQuestions = getSimilarQuestions(q.text);
+
+            return (
+              <div
+                key={q.id}
+                className={`bg-white/5 backdrop-blur-sm border rounded-2xl p-4 cursor-pointer transition-all ${
+                  selected?.id === q.id ? 'border-red-500/50 bg-red-500/10' : 'border-white/10 hover:border-white/20'
+                }`}
+                onClick={() => { setSelected(q); setSelectedTopic(''); }}
+              >
+                {/* NUEVO: Alerta de duplicados */}
+                {similarQuestions.length > 0 && (
+                  <div className="mb-3 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <span className="text-amber-400 text-sm">⚠️</span>
+                      <div className="flex-1">
+                        <p className="text-xs text-amber-300 font-medium mb-1">
+                          {similarQuestions.length} similar question{similarQuestions.length > 1 ? 's' : ''} found
+                        </p>
+                        <p className="text-xs text-amber-400/70 mb-2">
+                          Previous: "{similarQuestions[0].text.substring(0, 60)}..."
+                        </p>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            reusePreviousAnswer(q.id, similarQuestions[0]);
+                            setSelected(q);
+                          }}
+                          className="px-2 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded text-xs transition-all"
+                        >
+                          📋 Reuse previous answer
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div className="flex-1">
+                    {/* NUEVO: Indicador de follow-up */}
+                    {q.isFollowUp && (
+                      <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 border border-blue-500/30 rounded text-xs text-blue-300 mb-1">
+                        <span>↩️</span>
+                        <span>Follow-up question</span>
+                      </div>
+                    )}
+                    <p className="text-sm text-white">"{q.text}"</p>
+                    {q.studentName && (
+                      <p className="text-xs text-slate-500 mt-1">— {q.studentName}</p>
+                    )}
+                  </div>
+                  <span className="text-xs text-slate-500 whitespace-nowrap">{formatTime(q.timestamp)}</span>
                 </div>
-                <span className="text-xs text-slate-500 whitespace-nowrap">{formatTime(q.timestamp)}</span>
-              </div>
 
               {selected?.id === q.id && (
                 <div className="mt-3 pt-3 border-t border-white/10">
@@ -722,8 +817,9 @@ function OperatorView() {
                   </div>
                 </div>
               )}
-            </div>
-          ))
+              </div>
+            );
+          })
         )}
       </div>
 
