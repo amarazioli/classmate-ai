@@ -275,6 +275,12 @@ function StudentView() {
   const sendMessage = () => {
     if (!message.trim() || !currentStudent) return;
 
+    // NUEVO: Prevenir envío si hay pregunta pendiente sin respuesta
+    if (isWaitingForReply) {
+      console.warn('Cannot send message: waiting for AI response');
+      return;
+    }
+
     // NUEVO: Detectar si es un follow-up
     const studentQuestions = messages.filter(
       m => m.type === 'student' && m.studentId === currentStudent.id
@@ -527,24 +533,40 @@ function StudentView() {
       
       <div className="relative p-4 border-t border-white/10">
         <div className="flex gap-3">
-          <input 
+          <input
             type="text"
-            placeholder="Ask anything..."
-            className="flex-1 px-4 py-3 bg-white/10 backdrop-blur-sm border border-white/10 rounded-xl text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500/50 transition-all"
+            placeholder={isWaitingForReply ? "Waiting for AI response..." : "Ask anything..."}
+            disabled={isWaitingForReply}
+            className={`flex-1 px-4 py-3 bg-white/10 backdrop-blur-sm border ${
+              isWaitingForReply ? 'border-slate-600 opacity-50 cursor-not-allowed' : 'border-white/10'
+            } rounded-xl text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500/50 transition-all`}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+            onKeyPress={(e) => e.key === 'Enter' && !isWaitingForReply && sendMessage()}
           />
-          <button 
+          <button
             onClick={sendMessage}
-            className="px-5 py-3 rounded-xl text-sm font-medium hover:shadow-lg transition-all text-white"
-            style={{background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'}}
+            disabled={isWaitingForReply}
+            className={`px-5 py-3 rounded-xl text-sm font-medium transition-all text-white ${
+              isWaitingForReply ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-lg'
+            }`}
+            style={{
+              background: isWaitingForReply
+                ? 'linear-gradient(135deg, #64748b 0%, #475569 100%)'
+                : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'
+            }}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
             </svg>
           </button>
         </div>
+        {isWaitingForReply && (
+          <p className="text-xs text-amber-400 mt-2 flex items-center gap-1.5">
+            <span>⏳</span>
+            <span>Please wait for a response before asking another question</span>
+          </p>
+        )}
         <div className="flex items-center justify-center gap-1.5 mt-3">
           <svg className="w-3 h-3 text-slate-500" fill="currentColor" viewBox="0 0 20 20">
             <path fillRule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z" clipRule="evenodd" />
